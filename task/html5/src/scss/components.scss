@@ -1,0 +1,250 @@
+// Components SCSS - Specific component styles
+
+@import 'main';
+
+// Counter Section
+.counter-section {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.counter-card {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border-radius: 20px;
+  padding: $spacing-unit * 6;
+  max-width: 500px;
+  margin: 0 auto;
+  @include card-shadow;
+  
+  @include responsive($breakpoint-mobile) {
+    padding: $spacing-unit * 4;
+  }
+}
+
+.counter-display {
+  font-size: 5rem;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: $spacing-unit * 4;
+  color: #ffd700;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+  
+  @include responsive($breakpoint-mobile) {
+    font-size: 3.5rem;
+  }
+}
+
+.counter-controls {
+  display: flex;
+  gap: $spacing-unit * 2;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+// Features Section
+.features-section {
+  background: white;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: $spacing-unit * 4;
+  
+  @include responsive($breakpoint-mobile) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.feature-card {
+  background: white;
+  padding: $spacing-unit * 4;
+  border-radius: 15px;
+  text-align: center;
+  @include card-shadow;
+  @include transition(transform);
+  border: 1px solid $border-color;
+  
+  &:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  }
+  
+  .feature-icon {
+    font-size: 3rem;
+    margin-bottom: $spacing-unit * 2;
+  }
+  
+  h3 {
+    color: $primary-color;
+    margin-bottom: $spacing-unit * 2;
+    font-size: 1.5rem;
+  }
+  
+  p {
+    color: $text-color;
+    line-height: 1.6;
+  }
+}
+
+// Form Section
+.form-section {
+  background: $light-color;
+}
+
+.contact-form {
+  max-width: 600px;
+  margin: 0 auto;
+  background: white;
+  padding: $spacing-unit * 6;
+  border-radius: 15px;
+  @include card-shadow;
+  
+  @include responsive($breakpoint-mobile) {
+    padding: $spacing-unit * 4;
+  }
+}
+
+.form-group {
+  margin-bottom: $spacing-unit * 3;
+  
+  label {
+    display: block;
+    margin-bottom: $spacing-unit;
+    font-weight: 600;
+    color: $dark-color;
+  }
+  
+  input,
+  textarea {
+    width: 100%;
+    padding: $spacing-unit * 1.5;
+    border: 2px solid $border-color;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: $font-family;
+    @include transition(border-color);
+    
+    &:focus {
+      outline: none;
+      border-color: $primary-color;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    }
+    
+    &::placeholder {
+      color: #9ca3af;
+    }
+  }
+  
+  textarea {
+    resize: vertical;
+    min-height: 120px;
+  }
+}
+
+.form-result {
+  margin-top: $spacing-unit * 3;
+}
+
+.alert {
+  padding: $spacing-unit * 2;
+  border-radius: 8px;
+  margin-bottom: $spacing-unit * 2;
+  
+  &.alert-success {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+  }
+  
+  strong {
+    font-weight: 700;
+  }
+}
+
+// About Page Styles
+.about-content {
+  max-width: 800px;
+  margin: 0 auto;
+  
+  h2 {
+    color: $primary-color;
+    margin-bottom: $spacing-unit * 3;
+    font-size: 2rem;
+  }
+  
+  h3 {
+    color: $dark-color;
+    margin-top: $spacing-unit * 6;
+    margin-bottom: $spacing-unit * 3;
+    font-size: 1.5rem;
+  }
+  
+  p {
+    margin-bottom: $spacing-unit * 2;
+    line-height: 1.8;
+  }
+  
+  ol {
+    margin-left: $spacing-unit * 3;
+    margin-bottom: $spacing-unit * 3;
+    
+    li {
+      margin-bottom: $spacing-unit;
+      line-height: 1.8;
+    }
+  }
+}
+
+.tech-stack {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: $spacing-unit * 3;
+  margin: $spacing-unit * 4 0;
+}
+
+.tech-item {
+  background: $light-color;
+  padding: $spacing-unit * 3;
+  border-radius: 10px;
+  border-left: 4px solid $primary-color;
+  
+  strong {
+    display: block;
+    color: $primary-color;
+    font-size: 1.2rem;
+    margin-bottom: $spacing-unit;
+  }
+  
+  p {
+    margin: 0;
+    color: $text-color;
+    font-size: 0.9rem;
+  }
+}
+
+.cta-section {
+  text-align: center;
+  margin-top: $spacing-unit * 8;
+}
+
+// Utility Classes
+.text-center {
+  text-align: center;
+}
+
+.mt-4 {
+  margin-top: $spacing-unit * 4;
+}
+
+.mb-4 {
+  margin-bottom: $spacing-unit * 4;
+}
+
+.p-4 {
+  padding: $spacing-unit * 4;
+}
+
+
+

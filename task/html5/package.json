@@ -1,0 +1,18 @@
+{
+  "name": "html5-static-app",
+  "version": "1.0.0",
+  "description": "Static HTML5 Application with SCSS",
+  "scripts": {
+    "build": "sass src/scss:dist/css && npm run copy-files",
+    "copy-files": "node build.js",
+    "watch": "sass --watch src/scss:dist/css",
+    "dev": "npm run build && npx http-server dist -p 3000"
+  },
+  "devDependencies": {
+    "sass": "^1.69.5",
+    "http-server": "^14.1.1"
+  }
+}
+
+
+

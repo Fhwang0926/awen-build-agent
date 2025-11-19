@@ -1,0 +1,21 @@
+{
+  "name": "vue3-sample-app",
+  "version": "1.0.0",
+  "description": "Sample Vue 3 Application",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.3.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.3.4",
+    "vite": "^4.4.9"
+  }
+}
+
+
+
