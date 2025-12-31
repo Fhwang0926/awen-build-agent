@@ -14,10 +14,9 @@ async function getBuildTask() {
             return;
         }
 
-        console.log('📦 수신 데이터:', data);
-        const githubUrl = data.github_url;
+        const repo_url = data.repo_url;
 
-        if (!githubUrl) {
+        if (!repo_url) {
             console.log('⚠️ 빌드할 저장소 URL이 없습니다.');
             return;
         }
@@ -29,5 +28,22 @@ async function getBuildTask() {
     }
 }
 
-// TODO: 결과 반환 api 호출 로직 구현
-module.exports = { getBuildTask };
+async function reportBuildResult(payload) {
+    const url = `${BASE_URL}/api/log_build_agent_task/report`;
+
+    try {
+        console.log(`🔍 외부 API로 결과 보고 중: ${url}`);
+        const response = await axios.post(url, payload);
+        const data = response.data.data.data;
+
+        if (!data) {
+            console.log('⚠️ 보고된 결과가 없습니다.');
+            return;
+        }
+
+    } catch (error) {
+        console.error('❌ 에러 발생:', error.message);
+    }
+}
+
+module.exports = { getBuildTask, reportBuildResult };
