@@ -41,11 +41,56 @@ async function gitClone(repo_url, token, targetPath) {
  * @return {string} 'USER_ERROR' | 'SERVICE_ERROR'
  */
 async function determineErrorType(error) {
-    const errorMessage = error.message;
+    const msg = (error.message || '').toLowerCase();
 
-    // TODO: 에러 메세지 분석 로직 추가 필요
-    // 모듈, 코드, 버전, 환경 설정 문제 등 -> 사용자 문제
-    // 그 외는 서비스 문제
+    //서비스 에러
+    // 디스크 부족, 도커 데몬 연결 실패, 내부 네트워크 타임아웃 등
+    const serviceKeywords = [
+        'no space left on device',
+        'enospc',
+        'connect enoent',
+        '/var/run/docker.sock',
+        'econnrefused',
+        'etimedout',
+        '500 internal server error',
+        '429 too many requests',
+        'docker daemon'
+    ];
+
+    // 사용자 에러 
+    // 문법 에러, 모듈 미발견, 빌드 명령어 실패 등
+    const userKeywords = [
+        'module_not_found',
+        'cannot find module',
+        'syntaxerror',
+        'referenceerror',
+        'typeerror',
+        'npm err',
+        'yarn error',
+        'command failed',
+        'exit code',
+        'failed to solve',
+        'executor failed',
+        'enoent',
+        'unsupported engine',
+        'directory not found',
+        '.env',
+        'manifest not found'
+    ];
+
+    if (serviceKeywords.some(keyword => msg.includes(keyword))) {
+        console.log('[ErrorType] 서비스 에러 감지됨');
+        return 'SERVICE_ERROR';
+    }
+
+    if (userKeywords.some(keyword => msg.includes(keyword))) {
+        console.log('[ErrorType] 사용자 코드/설정 에러 감지됨');
+        return 'USER_ERROR';
+    }
+
+    // 분류되지 않은 에러
+    console.log('[ErrorType] 원인 불명 (서비스 에러로 간주)');
+    return 'SERVICE_ERROR';
 }
 
 // 빌드 파이프라인 실행
@@ -89,7 +134,8 @@ async function runDeploymentPipeline(targetPath) {
 
                 if (attempt === MAX_ATTEMPTS) {
                     // 에러 원인 판별 함수 호출 위치
-                    throw new Error(`최대 수정 시도 횟수(${MAX_ATTEMPTS}회)를 초과했습니다. 자동 조치 실패.`);
+                    const errorType = await determineErrorType(error);
+                    throw new Error(`최대 수정 시도 횟수(${MAX_ATTEMPTS}회)를 초과했습니다. 자동 조치 실패. ${errorType}`);
                 }
 
                 // 3. 🩹 디버깅 및 수정 에이전트 호출
