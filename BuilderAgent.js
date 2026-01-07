@@ -24,7 +24,7 @@ function runDockerBuildAndMount(plan) {
             console.log(`   -> LLM이 선택한 베이스 이미지: ${plan.dockerImage}`);
         }
         console.log(`   -> 빌드 명령: ${plan.buildCommand}`);
-        
+
         // 1. 빌드 이미지 생성
         exec(`docker build -t ${buildImageName} ${tempDir}`, (err, stdout, stderr) => {
             if (err) {
@@ -38,7 +38,7 @@ function runDockerBuildAndMount(plan) {
             if (!fs.existsSync(plan.sourceMountPath)) {
                 return reject(new Error(`소스코드 경로를 찾을 수 없습니다: ${plan.sourceMountPath}`));
             }
-            
+
             // package.json 존재 확인
             const packageJsonPath = path.join(plan.sourceMountPath, 'package.json');
             const hasPackageJson = fs.existsSync(packageJsonPath);
@@ -50,21 +50,22 @@ function runDockerBuildAndMount(plan) {
             // 소스코드 마운트: 호스트의 소스코드 -> 컨테이너의 작업 경로
             // Windows 경로를 Docker가 이해할 수 있도록 변환
             const sourcePath = plan.sourceMountPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
-            let volumeMounts = `-v "${plan.sourceMountPath}":${appWorkDir}`; 
+            let volumeMounts = `-v "${sourcePath}":${appWorkDir}`;
 
             // 프론트엔드인 경우: 결과물 폴더 마운트 설정
             if (plan.artifactDir) {
                 const artifactHostPath = path.join(tempDir, 'artifact_output'); // 호스트의 결과물 임시 저장소
+                const artifactPath = artifactHostPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
                 if (!fs.existsSync(artifactHostPath)) fs.mkdirSync(artifactHostPath);
-                
+
                 // 아티팩트 폴더 마운트: 컨테이너의 빌드 결과 -> 호스트의 임시 경로
-                volumeMounts += ` -v ${artifactHostPath}:${appWorkDir}/${plan.artifactDir}`;
+                volumeMounts += ` -v "${artifactPath}":${appWorkDir}/${plan.artifactDir}`;
             }
 
             // Windows 경로 이스케이프 처리
             const escapedCommand = plan.buildCommand.replace(/"/g, '\\"');
             const runCmd = `docker run --rm --name ${containerName} ${volumeMounts} ${buildImageName} sh -c "${escapedCommand}"`;
-            
+
             console.log(`   -> 실행 명령: ${runCmd.substring(0, 200)}...`);
             console.log(`   -> 마운트 확인: 컨테이너 내부 ${appWorkDir}에 소스코드 마운트됨`);
 
@@ -75,34 +76,62 @@ function runDockerBuildAndMount(plan) {
                 const buildOutput = stdout || '';
                 const buildErrors = stderr || '';
                 const allOutput = buildOutput + buildErrors;
-                
+
                 if (err) {
                     console.error(`\n   ❌ [BUILD ERROR]`);
                     console.error(`   ${(stderr || stdout || err.message).substring(0, 500)}`);
                     const errorMessage = stderr || stdout || err.message || '알 수 없는 빌드 오류';
                     return reject(new Error(errorMessage));
                 }
-                
+
                 // 빌드 성공 여부 평가
                 const buildSuccess = evaluateBuildSuccess(allOutput, plan);
-                
+
                 if (buildSuccess) {
                     console.log("\n   ✅ 빌드/실행 성공!");
-                    
+
                     // 결과물 확인
                     if (plan.artifactDir) {
                         const artifactPath = path.join(plan.sourceMountPath, plan.artifactDir);
                         const artifactHostPath = path.join(tempDir, 'artifact_output');
-                        
+
                         if (fs.existsSync(artifactHostPath)) {
                             const files = fs.readdirSync(artifactHostPath);
                             console.log(`   -> 빌드 결과물 확인: ${files.length}개 파일 생성됨`);
                             if (files.length > 0) {
                                 console.log(`      주요 파일: ${files.slice(0, 5).join(', ')}`);
                             }
+
+                            if (files.length === 0) {
+                                // 분석 후 예측 경로와 실제 경로가 다른 경우 
+                                console.log(`예측 경로(${plan.artifactDir})가 비어있습니다. 소스 폴더 내 다른 경로를 탐색합니다.`);
+
+                                //빌드 결과 폴더명 리스트
+                                const buildDirs = ['build', 'dist'];
+
+                                // 분석했던 이름이 있다면 리스트에서 제외 (중복 방지)
+                                const dir = buildDirs.filter(dir => dir !== plan.artifactDir);
+
+                                for (const dirName of dir) {
+                                    const fallbackPath = path.join(plan.sourceMountPath, dirName);
+
+                                    if (fs.existsSync(fallbackPath)) {
+                                        const files = fs.readdirSync(fallbackPath);
+                                        console.log(`   -> 빌드 결과물 확인 (${dirName}): ${files.length}개 파일 생성됨`);
+                                        if (files.length > 0) {
+                                            console.log(`      주요 파일: ${files.slice(0, 5).join(', ')}`);
+                                        }
+
+                                        // 여기서 발견된 경로로 결과물 반환
+                                        const resultPath = path.join(plan.sourceMountPath, dirName);
+                                        resolve(resultPath);
+                                        return;
+                                    }
+                                }
+                            }
                         }
                     }
-                    
+
                     // 결과물 경로 반환 (프론트엔드인 경우에만 필요)
                     const resultPath = plan.artifactDir ? path.join(tempDir, 'artifact_output') : '';
                     resolve(resultPath);
@@ -113,7 +142,7 @@ function runDockerBuildAndMount(plan) {
                     resolve(resultPath);
                 }
             });
-            
+
             // 실시간 출력 스트림
             if (buildProcess.stdout) {
                 buildProcess.stdout.on('data', (data) => {
@@ -121,7 +150,7 @@ function runDockerBuildAndMount(plan) {
                     lines.forEach(line => {
                         if (line.trim()) {
                             // 중요한 메시지만 출력 (너무 많은 출력 방지)
-                            if (line.includes('npm') || line.includes('build') || 
+                            if (line.includes('npm') || line.includes('build') ||
                                 line.includes('error') || line.includes('warning') ||
                                 line.includes('success') || line.includes('complete') ||
                                 line.includes('%') || line.includes('Compiled')) {
@@ -131,14 +160,14 @@ function runDockerBuildAndMount(plan) {
                     });
                 });
             }
-            
+
             if (buildProcess.stderr) {
                 buildProcess.stderr.on('data', (data) => {
                     const lines = data.toString().split('\n');
                     lines.forEach(line => {
                         if (line.trim() && !line.includes('deprecated')) {
                             // deprecated 경고는 제외하고 출력
-                            if (line.includes('error') || line.includes('Error') || 
+                            if (line.includes('error') || line.includes('Error') ||
                                 line.includes('failed') || line.includes('Failed')) {
                                 console.error(`   ⚠️ ${line.trim()}`);
                             }
@@ -155,7 +184,7 @@ function runDockerBuildAndMount(plan) {
  */
 function evaluateBuildSuccess(output, plan) {
     const outputLower = output.toLowerCase();
-    
+
     // 성공 신호
     const successSignals = [
         'build successful',
@@ -167,7 +196,7 @@ function evaluateBuildSuccess(output, plan) {
         '✓ built',
         'build finished'
     ];
-    
+
     // 실패 신호
     const failureSignals = [
         'build failed',
@@ -176,18 +205,18 @@ function evaluateBuildSuccess(output, plan) {
         'npm err',
         'failed to compile'
     ];
-    
+
     // 성공 신호 확인
     const hasSuccessSignal = successSignals.some(signal => outputLower.includes(signal));
-    
+
     // 실패 신호 확인
     const hasFailureSignal = failureSignals.some(signal => outputLower.includes(signal));
-    
+
     // 결과물 확인 (프론트엔드인 경우)
     if (plan.artifactDir) {
         const artifactPath = path.join(plan.sourceMountPath, plan.artifactDir);
         const hasArtifacts = fs.existsSync(artifactPath);
-        
+
         if (hasArtifacts) {
             const files = fs.readdirSync(artifactPath);
             if (files.length > 0) {
@@ -196,16 +225,16 @@ function evaluateBuildSuccess(output, plan) {
             }
         }
     }
-    
+
     // 신호 기반 평가
     if (hasSuccessSignal && !hasFailureSignal) {
         return true;
     }
-    
+
     if (hasFailureSignal) {
         return false;
     }
-    
+
     // 신호가 없으면 에러가 없으면 성공으로 간주
     return !hasFailureSignal;
 }

@@ -244,6 +244,7 @@ async function runDeploymentPipeline(targetPath) {
 // 클론 및 빌드 실행 함수
 async function buildProject() {
     try {
+        // TODO: 빌드 태스크 가져오기 (스케줄로 일정 주기마다 가져올 테스트를 확인해야함)
         const task = await getBuildTask();
 
         const repoName = task.repo_url.split('/').pop().replace('.git', '');
