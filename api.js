@@ -10,7 +10,6 @@ async function getBuildTask() {
         const data = response.data.data.data;
 
         if (!data) {
-            console.log('⚠️ 빌드할 태스크가 없습니다.');
             return;
         }
 

@@ -11,9 +11,45 @@ const { debugAndFixCode } = require('./DebuggerAgent');
 const { getBuildTask, reportBuildResult } = require('./api.js');
 const simpleGit = require('simple-git');
 
-// 최대 수정 시도 횟수
-const MAX_ATTEMPTS = 1;
+//작업 없을 때 대기 시간
+const POLL_INTERVAL = 10000;
 
+//최대 작업 가능 횟수
+const MAX_TASKS = 1;
+
+// 최대 수정 시도 횟수
+const MAX_ATTEMPTS = 10;
+
+// 주기적 실행 함수
+async function startAgent() {
+    console.log(`\n🚀 빌드 에이전트 시작 (기본 대기 간격: ${POLL_INTERVAL / 1000}초)`);
+    await processNextTask();
+}
+
+// 다음 작업을 처리하는 핵심 함수
+async function processNextTask() {
+    try {
+        // 작업 탐색
+        const hasTask = await getBuildTask();
+
+        if (hasTask) {
+            console.log(`🔄 작업 있음. 다음 작업 확인...`);
+
+            // TODO: 동시 작업 제어 (최대 가능 횟수 지정)
+            buildProject(hasTask);
+            setImmediate(() => processNextTask());
+        } else {
+            // 작업이 없으면 설정된 시간만큼 대기
+            console.log(`\n💤 작업 없음. ${POLL_INTERVAL / 1000}초 대기...`);
+            setTimeout(() => processNextTask(), POLL_INTERVAL);
+        }
+
+    } catch (error) {
+        // 에러 발생 시 (시스템 에러 등) 안전하게 대기 후 재시도
+        console.error('❌ 실행 중 시스템 오류:', error.message);
+        setTimeout(() => processNextTask(), POLL_INTERVAL);
+    }
+}
 // Git 저장소를 특정 경로로 클론하는 함수
 async function gitClone(repo_url, token, targetPath) {
     try {
@@ -242,11 +278,8 @@ async function runDeploymentPipeline(targetPath) {
 }
 
 // 클론 및 빌드 실행 함수
-async function buildProject() {
+async function buildProject(task) {
     try {
-        // TODO: 빌드 태스크 가져오기 (스케줄로 일정 주기마다 가져올 테스트를 확인해야함)
-        const task = await getBuildTask();
-
         const repoName = task.repo_url.split('/').pop().replace('.git', '');
         const targetPath = path.join(__dirname, 'cloned_projects', `${repoName}-${Date.now()}`);
 
@@ -276,7 +309,7 @@ async function buildProject() {
 }
 
 // 마스터 에이전트 실행 시작
-buildProject().catch((error) => {
+startAgent().catch((error) => {
     console.error("\n💥 치명적 오류: 파이프라인 실행 중 예기치 않은 오류 발생");
     console.error(`오류: ${error.message}`);
     if (error.stack) {
