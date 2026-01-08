@@ -55,10 +55,10 @@ function runDockerBuildAndMount(plan) {
 
             // 프론트엔드인 경우: 결과물 폴더 마운트 설정
             if (plan.artifactDir) {
-                // 중복 방지 위한 빌드 ID 생성
+                // 고유한 빌드 결과 임시 폴더 생성 (중복 방지)
                 const artifactHostPath = path.join(tempDir, 'artifact_output', buildImageName);
                 const artifactPath = artifactHostPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
-                if (!fs.existsSync(artifactHostPath)) fs.mkdirSync(artifactHostPath);
+                if (!fs.existsSync(artifactHostPath)) fs.mkdirSync(artifactHostPath, { recursive: true });
 
                 // 아티팩트 폴더 마운트: 컨테이너의 빌드 결과 -> 호스트의 임시 경로
                 volumeMounts += ` -v "${artifactPath}":${appWorkDir}/${plan.artifactDir}`;

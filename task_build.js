@@ -13,48 +13,51 @@ const simpleGit = require('simple-git');
 const { default: pLimit } = require('p-limit');
 
 //작업 없을 때 대기 시간
-const POLL_INTERVAL = 10000;
+const POLL_INTERVAL = 5000;
 
 // 최대 동시 작업 횟수
-const MAX_CONCURRENT_TASKS = 5;
+const MAX_CONCURRENT_TASKS = 2;
 const limit = pLimit(MAX_CONCURRENT_TASKS);
 
 // 최대 수정 시도 횟수
-const MAX_ATTEMPTS = 10;
+const MAX_ATTEMPTS = 1;
 
 // 주기적 실행 함수
 async function startAgent() {
     console.log(`\n🚀 빌드 에이전트 시작 (기본 대기 간격: ${POLL_INTERVAL / 1000}초)`);
-    await processNextTask();
+    await processTask();
 }
 
-// 다음 작업을 처리하는 핵심 함수
-async function processNextTask() {
+// 작업을 처리하는 핵심 함수
+async function processTask() {
     try {
 
+        // 동시 작업이 최대치라면 대기
         if (limit.activeCount >= MAX_CONCURRENT_TASKS) {
-            console.log(`⏳ 작업 슬롯 가득 참 (${limit.activeCount()}/${MAX_CONCURRENT_TASKS}). 대기 중...`);
-            setTimeout(() => processNextTask(), POLL_INTERVAL);
+            console.log(`⏳ 작업 슬롯 가득 참 (${limit.activeCount}/${MAX_CONCURRENT_TASKS}). 대기 중...`);
+            setTimeout(() => processTask(), POLL_INTERVAL);
+            return;
         }
 
         // 작업 탐색
-        const hasTask = await getBuildTask();
+        const task = await getBuildTask();
 
-        if (hasTask) {
-            console.log(`🔄 작업 있음. 다음 작업 확인...`);
-
-            limit(() => buildProject(hasTask));
-            setTimeout(() => processNextTask(), 1000);
-        } else {
-            // 작업이 없으면 설정된 시간만큼 대기
+        if (!task) {
             console.log(`\n💤 작업 없음. ${POLL_INTERVAL / 1000}초 대기...`);
-            setTimeout(() => processNextTask(), POLL_INTERVAL);
+            setTimeout(() => processTask(), POLL_INTERVAL);
+            return;
         }
 
+        console.log(`🔄 작업 있음. 다음 작업 확인...`);
+
+        limit(() => buildProject(task));
+        setTimeout(() => processTask(), 1000);
+
+
     } catch (error) {
-        // 에러 발생 시 (시스템 에러 등) 안전하게 대기 후 재시도
+        // 에러 발생 시 대기 후 재시도
         console.error('❌ 실행 중 시스템 오류:', error.message);
-        setTimeout(() => processNextTask(), POLL_INTERVAL);
+        setTimeout(() => processTask(), POLL_INTERVAL);
     }
 }
 // Git 저장소를 특정 경로로 클론하는 함수
@@ -80,7 +83,7 @@ async function gitClone(repo_url, token, targetPath) {
  * 에러 원인 판별 함수 (서비스 문제 OR 사용자 문제)
  * 모든 재시도 후에도 실패한 경우 호출
  * 
- * @param {Error} error 
+ * @param {Error|string} error 
  * @return {string} 'USER_ERROR' | 'SERVICE_ERROR'
  */
 async function determineErrorType(error) {
@@ -103,22 +106,10 @@ async function determineErrorType(error) {
     // 사용자 에러 
     // 문법 에러, 모듈 미발견, 빌드 명령어 실패 등
     const userKeywords = [
-        'module_not_found',
-        'cannot find module',
-        'syntaxerror',
-        'referenceerror',
-        'typeerror',
-        'npm err',
-        'yarn error',
-        'command failed',
-        'exit code',
-        'failed to solve',
-        'executor failed',
-        'enoent',
-        'unsupported engine',
-        'directory not found',
-        '.env',
-        'manifest not found'
+        'module_not_found', 'cannot find module', 'syntaxerror', 'referenceerror',
+        'typeerror', 'npm err', 'yarn error', 'command failed', 'exit code',
+        'failed to solve', 'executor failed', 'enoent', 'unsupported engine',
+        'directory not found', '.env', 'manifest not found', 'pkg-config'
     ];
 
     if (serviceKeywords.some(keyword => msg.includes(keyword))) {
@@ -151,6 +142,7 @@ async function runDeploymentPipeline(targetPath) {
         summary: '',
         error: ''
     };
+    let errorType = '';
 
     try {
         // 1. 초기 분석 실행 (비동기)
@@ -177,7 +169,7 @@ async function runDeploymentPipeline(targetPath) {
 
                 if (attempt === MAX_ATTEMPTS) {
                     // 에러 원인 판별 함수 호출 위치
-                    const errorType = await determineErrorType(error);
+                    errorType = await determineErrorType(error);
                     throw new Error(`최대 수정 시도 횟수(${MAX_ATTEMPTS}회)를 초과했습니다. 자동 조치 실패. ${errorType}`);
                 }
 
@@ -246,7 +238,6 @@ async function runDeploymentPipeline(targetPath) {
                 summary: `전체 파이프라인 완료`
             },
             deploy_info: {
-                currentProjectPath: currentProjectPath,
                 artifactDir: currentPlan.artifactDir,
                 artifactPath: artifactPath,
             },
@@ -258,28 +249,19 @@ async function runDeploymentPipeline(targetPath) {
         if (error.stack) {
             console.error(`스택 트레이스:\n${error.stack}`);
         }
-        console.log("=================================================");
 
-        logs.summary = `자동 빌드 및 디버깅 실패`;
-
-        // 단계별 에러 메세지
-        if (step === 'ANALYSIS' || step === 'BUILD') {
-            logs.error = `error_message: ${error.message}\nstack_trace: ${error.stack}`;
+        if (step === "DEBUG") {
+            logs.summary = `자동 빌드 및 디버깅 실패 (원인: ${errorType})`;
+        } else {
+            logs.summary = `자동 빌드 및 디버깅 실패`;
         }
 
-        if (step === 'DEBUG') {
-            logs.error = error.message;
-            //TODO: 디버깅 에러 메세지 추가 (문제의 파일, 라인 등)
-        }
-
-        if (step === 'DEPLOY') {
-            logs.error = error.message;
-        }
+        logs.error = error.message;
 
         return {
             status: 'FAILED',
             step: step,
-            logs: logs
+            logs: logs,
         };
     }
 }
