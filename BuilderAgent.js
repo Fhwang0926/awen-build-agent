@@ -3,6 +3,7 @@
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 /**
  * 맞춤형 Docker 컨테이너를 빌드하고 소스 마운트 후 빌드를 실행합니다.
@@ -11,7 +12,7 @@ const path = require('path');
  */
 function runDockerBuildAndMount(plan) {
     return new Promise((resolve, reject) => {
-        const tempDir = path.join(__dirname, 'temp_build'); // 호스트의 임시 경로
+        const tempDir = path.join(__dirname, 'temp_build');
         const dockerfilePath = path.join(tempDir, 'Dockerfile');
         const buildImageName = `llm-build-${Date.now()}`;
         const containerName = `llm-builder-${Date.now()}`;
@@ -54,7 +55,8 @@ function runDockerBuildAndMount(plan) {
 
             // 프론트엔드인 경우: 결과물 폴더 마운트 설정
             if (plan.artifactDir) {
-                const artifactHostPath = path.join(tempDir, 'artifact_output'); // 호스트의 결과물 임시 저장소
+                // 중복 방지 위한 빌드 ID 생성
+                const artifactHostPath = path.join(tempDir, 'artifact_output', buildImageName);
                 const artifactPath = artifactHostPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
                 if (!fs.existsSync(artifactHostPath)) fs.mkdirSync(artifactHostPath);
 
@@ -109,7 +111,7 @@ function runDockerBuildAndMount(plan) {
                                 //빌드 결과 폴더명 리스트
                                 const buildDirs = ['build', 'dist'];
 
-                                // 분석했던 이름이 있다면 리스트에서 제외 (중복 방지)
+                                // 분석했던 이름이 있다면 리스트에서 제외
                                 const dir = buildDirs.filter(dir => dir !== plan.artifactDir);
 
                                 for (const dirName of dir) {

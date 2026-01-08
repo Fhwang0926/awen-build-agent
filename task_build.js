@@ -10,12 +10,14 @@ const { deployToWebServer } = require('./DeployAgent');
 const { debugAndFixCode } = require('./DebuggerAgent');
 const { getBuildTask, reportBuildResult } = require('./api.js');
 const simpleGit = require('simple-git');
+const { default: pLimit } = require('p-limit');
 
 //작업 없을 때 대기 시간
 const POLL_INTERVAL = 10000;
 
-//최대 작업 가능 횟수
-const MAX_TASKS = 1;
+// 최대 동시 작업 횟수
+const MAX_CONCURRENT_TASKS = 5;
+const limit = pLimit(MAX_CONCURRENT_TASKS);
 
 // 최대 수정 시도 횟수
 const MAX_ATTEMPTS = 10;
@@ -29,15 +31,20 @@ async function startAgent() {
 // 다음 작업을 처리하는 핵심 함수
 async function processNextTask() {
     try {
+
+        if (limit.activeCount >= MAX_CONCURRENT_TASKS) {
+            console.log(`⏳ 작업 슬롯 가득 참 (${limit.activeCount()}/${MAX_CONCURRENT_TASKS}). 대기 중...`);
+            setTimeout(() => processNextTask(), POLL_INTERVAL);
+        }
+
         // 작업 탐색
         const hasTask = await getBuildTask();
 
         if (hasTask) {
             console.log(`🔄 작업 있음. 다음 작업 확인...`);
 
-            // TODO: 동시 작업 제어 (최대 가능 횟수 지정)
-            buildProject(hasTask);
-            setImmediate(() => processNextTask());
+            limit(() => buildProject(hasTask));
+            setTimeout(() => processNextTask(), 1000);
         } else {
             // 작업이 없으면 설정된 시간만큼 대기
             console.log(`\n💤 작업 없음. ${POLL_INTERVAL / 1000}초 대기...`);
