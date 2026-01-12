@@ -11,6 +11,7 @@ const { debugAndFixCode } = require('./DebuggerAgent');
 const { getBuildTask, reportBuildResult } = require('./api.js');
 const simpleGit = require('simple-git');
 const { default: pLimit } = require('p-limit');
+const fs = require('fs');
 
 //작업 없을 때 대기 시간
 const POLL_INTERVAL = 5000;
@@ -60,22 +61,34 @@ async function processTask() {
         setTimeout(() => processTask(), POLL_INTERVAL);
     }
 }
+
 // Git 저장소를 특정 경로로 클론하는 함수
 async function gitClone(repo_url, token, targetPath) {
     try {
         console.log(`🚚 Git 클론 시작: ${repo_url} -> ${targetPath}`);
+        const base64Token = Buffer.from(`x-access-token:${token}`).toString('base64');
 
+        // 헤더 설정을 포함하여 Git 클론 실행
         const git = simpleGit();
-        const authRepoUrl = repo_url.replace(
-            'https://',
-            `https://x-access-token:${token}@`
-        );
-        await git.clone(authRepoUrl, targetPath);
+        await git.clone(repo_url, targetPath, [
+            '--config', `http.extraheader=Authorization: Basic ${base64Token}`
+        ]);
 
         console.log('✅ Git clone 완료');
     } catch (error) {
         console.error('❌ Clone 중 에러 발생:', error);
         throw error;
+    }
+}
+
+// 클론된 소스코드 제거 함수
+async function removeClonedProject(targetPath) {
+    try {
+        console.log(`🗑️ 클론된 프로젝트 제거: ${targetPath}`);
+        await fs.promises.rm(targetPath, { recursive: true, force: true });
+        console.log('✅ 클론된 프로젝트 제거 완료');
+    } catch (error) {
+        console.error('❌ 클론된 프로젝트 제거 중 에러 발생:', error);
     }
 }
 
@@ -269,6 +282,7 @@ async function runDeploymentPipeline(targetPath) {
 // 클론 및 빌드 실행 함수
 async function buildProject(task) {
     try {
+        const startTime = new Date();
         const repoName = task.repo_url.split('/').pop().replace('.git', '');
         const targetPath = path.join(__dirname, 'cloned_projects', `${repoName}-${Date.now()}`);
 
@@ -276,9 +290,11 @@ async function buildProject(task) {
         await gitClone(task.repo_url, task.token, targetPath);
 
         // 빌드 수행
-        const startTime = new Date();
         const buildResult = await runDeploymentPipeline(targetPath);
         const endTime = new Date();
+
+        // 클론된 소스코드 제거
+        await removeClonedProject(targetPath);
 
         const payload = {
             ...buildResult,
