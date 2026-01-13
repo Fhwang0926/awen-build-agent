@@ -97,15 +97,19 @@ jobs:
             HARBOR_REGISTRY="${{ secrets.HARBOR_REGISTRY }}"
             # Remove https:// or http:// prefix if present (docker login needs just the hostname)
             HARBOR_REGISTRY=$(echo "$HARBOR_REGISTRY" | sed 's|^https\?://||' | sed 's|/$||')
-            echo "Logging into Harbor Registry: $HARBOR_REGISTRY"
+            # Mask sensitive information in logs (show first 3 and last 3 characters)
+            HARBOR_REGISTRY_MASKED=$(echo "$HARBOR_REGISTRY" | awk '{if(length($0)>6) print substr($0,1,3) "***" substr($0,length($0)-2); else print "***"}')
+            HARBOR_USER_MASKED=$(echo "${{ secrets.HARBOR_BOT_ID }}" | awk '{if(length($0)>4) print substr($0,1,2) "***" substr($0,length($0)-1); else print "***"}')
+            echo "Logging into Harbor Registry: $HARBOR_REGISTRY_MASKED"
+            echo "Username: $HARBOR_USER_MASKED"
             echo "${{ secrets.HARBOR_BOT_PW }}" | docker login "$HARBOR_REGISTRY" -u "${{ secrets.HARBOR_BOT_ID }}" --password-stdin
             if [ $? -eq 0 ]; then
               echo "✅ Successfully logged into Harbor Registry"
             else
               echo "❌ Failed to login to Harbor Registry"
               echo "Please check:"
-              echo "  1. Harbor Registry URL is correct: $HARBOR_REGISTRY"
-              echo "  2. Username is correct: ${{ secrets.HARBOR_BOT_ID }}"
+              echo "  1. Harbor Registry URL is correct (masked: $HARBOR_REGISTRY_MASKED)"
+              echo "  2. Username is correct (masked: $HARBOR_USER_MASKED)"
               echo "  3. Password is correct"
               echo "  4. User has permission to push to the registry"
               exit 1
