@@ -143,14 +143,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Send Notification
-        if: ${{ secrets.NOTIFICATION_WEBHOOK != '' }}
         run: |
-          NEW_VERSION="${{ steps.new-version.outputs.NEW_VERSION }}"
-          NOTES="${{ steps.release-notes.outputs.NOTES }}"
-          TEXT="🏷️ AWEN Build Agent $NEW_VERSION 태그 생성됨\n\n변경사항:\n${NOTES}\n\nGitHub: ${{ github.server_url }}/${{ github.repository }}/releases/tag/$NEW_VERSION"
-          PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
-          curl -X POST \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
-            "${{ secrets.NOTIFICATION_WEBHOOK }}"
+          if [ -n "${{ secrets.NOTIFICATION_WEBHOOK }}" ]; then
+            NEW_VERSION="${{ steps.new-version.outputs.NEW_VERSION }}"
+            NOTES="${{ steps.release-notes.outputs.NOTES }}"
+            TEXT="🏷️ AWEN Build Agent $NEW_VERSION 태그 생성됨\n\n변경사항:\n${NOTES}\n\nGitHub: ${{ github.server_url }}/${{ github.repository }}/releases/tag/$NEW_VERSION"
+            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
+            curl -X POST \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "${{ secrets.NOTIFICATION_WEBHOOK }}"
+          else
+            echo "NOTIFICATION_WEBHOOK secret not set, skipping notification"
+          fi
 
