@@ -1,4 +1,7 @@
-// DebuggerAgent.js - LLM 기반 에러 분석 및 코드 수정
+/**
+ * @fileoverview DebuggerAgent - LLM 기반 에러 분석 및 코드 수정 에이전트
+ * @description 빌드 에러를 분석하고 자동으로 코드를 수정하여 문제 해결
+ */
 
 const fs = require('fs');
 const path = require('path');
@@ -10,6 +13,8 @@ const MODIFIED_PROJECT_DIR = 'modified-poc-project';
 
 /**
  * 프로젝트의 핵심 파일만 읽어서 LLM에 전달 (최적화)
+ * @param {string} projectPath - 프로젝트 경로
+ * @returns {Array<Object>} 파일 정보 배열
  */
 function gatherProjectFiles(projectPath) {
     const files = [];
@@ -61,6 +66,10 @@ function gatherProjectFiles(projectPath) {
 
 /**
  * LLM을 사용하여 빌드 에러를 분석하고 코드를 수정
+ * @param {string} originalProjectPath - 원본 프로젝트 경로
+ * @param {Error|string} errorLog - 에러 로그
+ * @param {Object} plan - 빌드 계획 객체
+ * @returns {Promise<string>} 수정된 프로젝트 경로
  */
 async function debugAndFixCode(originalProjectPath, errorLog, plan) {
     console.log("\n🩹 [DebuggerAgent]: LLM 기반 빌드 에러 분석 및 수정 시작...");
@@ -164,10 +173,13 @@ async function debugAndFixCode(originalProjectPath, errorLog, plan) {
         return newProjectPath;
     }
 }
-
-
 /**
  * LLM을 사용하여 에러를 분석하고 코드를 수정
+ * @param {string} sourcePath - 수정할 프로젝트 경로
+ * @param {string} errorLog - 에러 로그
+ * @param {Array<Object>} projectFiles - 프로젝트 파일 정보
+ * @param {Object} plan - 빌드 계획 객체
+ * @returns {Promise<boolean>} 수정 성공 여부
  */
 async function analyzeAndFixWithLLM(sourcePath, errorLog, projectFiles, plan) {
     const systemPrompt = `디버깅 전문가. 에러 분석 후 최소 변경으로 수정.`;
@@ -305,6 +317,13 @@ JSON 응답:
 
 /**
  * LLM이 제안한 수정 사항을 실제 파일에 적용
+ * @param {string} sourcePath - 프로젝트 경로
+ * @param {Object} fix - 수정 정보 객체
+ * @param {string} fix.file - 수정할 파일 경로
+ * @param {string} fix.action - 수정 작업 타입
+ * @param {string} fix.description - 수정 설명
+ * @param {string} fix.code - 수정된 코드
+ * @returns {Promise<void>}
  */
 async function applyFix(sourcePath, fix) {
     const filePath = path.join(sourcePath, fix.file);
@@ -353,6 +372,9 @@ async function applyFix(sourcePath, fix) {
 
 /**
  * 기본 규칙 기반 수정 (LLM 실패 시 폴백)
+ * @param {string} sourcePath - 프로젝트 경로
+ * @param {string} errorLog - 에러 로그
+ * @returns {boolean} 수정 성공 여부
  */
 function simulateFix(sourcePath, errorLog) {
     const packageJsonPath = path.join(sourcePath, 'package.json');
@@ -516,7 +538,8 @@ function simulateFix(sourcePath, errorLog) {
  * 성공 로그와 ZIP 파일을 생성하는 함수
  * @param {string} projectPath - 수정된 프로젝트 경로
  * @param {string} artifactPath - 빌드 아티팩트 경로
- * @param {string} buildLog - 최종 빌드 성공 로그 (시뮬레이션)
+ * @param {string} buildLog - 최종 빌드 성공 로그
+ * @returns {Promise<void>}
  */
 async function createSuccessArtifacts(projectPath, artifactPath, buildLog) {
     const outputDir = path.join(projectPath, 'build_output');

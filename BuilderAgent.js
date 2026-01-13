@@ -1,4 +1,7 @@
-// BuilderAgent.js (Expanded for Docker/Mounting)
+/**
+ * @fileoverview BuilderAgent - Docker 기반 빌드 실행 에이전트
+ * @description Docker 컨테이너를 사용한 격리된 빌드 환경 관리
+ */
 
 const { exec } = require('child_process');
 const fs = require('fs');
@@ -6,9 +9,14 @@ const path = require('path');
 const crypto = require('crypto');
 
 /**
- * 맞춤형 Docker 컨테이너를 빌드하고 소스 마운트 후 빌드를 실행합니다.
- * @param {object} plan - AnalyzerAgent의 분석 결과
- * @returns {Promise<string>} - 빌드 결과물이 위치한 호스트 경로 (Artifact Path)
+ * 맞춤형 Docker 컨테이너를 빌드하고 소스 마운트 후 빌드를 실행
+ * @param {Object} plan - AnalyzerAgent의 분석 결과
+ * @param {string} plan.dockerfile - Dockerfile 내용
+ * @param {string} plan.dockerImage - Docker 베이스 이미지
+ * @param {string} plan.buildCommand - 빌드 명령어
+ * @param {string} plan.sourceMountPath - 소스코드 경로
+ * @param {string} plan.artifactDir - 빌드 결과물 디렉토리
+ * @returns {Promise<string>} 빌드 결과물이 위치한 호스트 경로 (Artifact Path)
  */
 function runDockerBuildAndMount(plan) {
     return new Promise((resolve, reject) => {
@@ -17,23 +25,28 @@ function runDockerBuildAndMount(plan) {
         const buildImageName = `llm-build-${Date.now()}`;
         const containerName = `llm-builder-${Date.now()}`;
 
-        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-        fs.writeFileSync(dockerfilePath, plan.dockerfile); // Dockerfile 저장
+        // temp_build 디렉토리 생성
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir);
+        }
+        
+        // Dockerfile 저장
+        fs.writeFileSync(dockerfilePath, plan.dockerfile);
 
-        console.log(`\n🏗️ [BuilderAgent]: 1. 맞춤형 Docker 이미지 빌드 시작: ${buildImageName}`);
+        console.log(`\n🏗️ [BuilderAgent]: Docker 이미지 빌드 시작: ${buildImageName}`);
         if (plan.dockerImage) {
             console.log(`   -> LLM이 선택한 베이스 이미지: ${plan.dockerImage}`);
         }
         console.log(`   -> 빌드 명령: ${plan.buildCommand}`);
 
-        // 1. 빌드 이미지 생성
+        // 1. Docker 이미지 빌드
         exec(`docker build -t ${buildImageName} ${tempDir}`, (err, stdout, stderr) => {
             if (err) {
                 const errorMessage = `Docker 이미지 빌드 실패: ${stderr || stdout || err.message}`;
                 return reject(new Error(errorMessage));
             }
 
-            console.log(`   -> 이미지 빌드 성공. 2. 빌드 컨테이너 실행 및 마운트.`);
+            console.log(`   -> 이미지 빌드 성공. 빌드 컨테이너 실행 및 마운트`);
 
             // 소스코드 경로 확인
             if (!fs.existsSync(plan.sourceMountPath)) {
@@ -47,18 +60,28 @@ function runDockerBuildAndMount(plan) {
             console.log(`   -> package.json 존재: ${hasPackageJson ? '예' : '아니오'}`);
 
             // 2. 소스코드 및 아티팩트 마운트를 포함한 실행 명령 생성
-            const appWorkDir = '/app'; // 컨테이너 내부 작업 경로
-            // 소스코드 마운트: 호스트의 소스코드 -> 컨테이너의 작업 경로
+            const appWorkDir = '/app';
+            
             // Windows 경로를 Docker가 이해할 수 있도록 변환
-            const sourcePath = plan.sourceMountPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
+            const sourcePath = plan.sourceMountPath
+                .replace(/\\/g, '/')
+                .replace(/^([A-Z]):/, '/$1')
+                .toLowerCase();
+            
             let volumeMounts = `-v "${sourcePath}":${appWorkDir}`;
 
             // 프론트엔드인 경우: 결과물 폴더 마운트 설정
             if (plan.artifactDir) {
                 // 고유한 빌드 결과 임시 폴더 생성 (중복 방지)
                 const artifactHostPath = path.join(tempDir, 'artifact_output', buildImageName);
-                const artifactPath = artifactHostPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
-                if (!fs.existsSync(artifactHostPath)) fs.mkdirSync(artifactHostPath, { recursive: true });
+                const artifactPath = artifactHostPath
+                    .replace(/\\/g, '/')
+                    .replace(/^([A-Z]):/, '/$1')
+                    .toLowerCase();
+                
+                if (!fs.existsSync(artifactHostPath)) {
+                    fs.mkdirSync(artifactHostPath, { recursive: true });
+                }
 
                 // 아티팩트 폴더 마운트: 컨테이너의 빌드 결과 -> 호스트의 임시 경로
                 volumeMounts += ` -v "${artifactPath}":${appWorkDir}/${plan.artifactDir}`;
@@ -69,18 +92,18 @@ function runDockerBuildAndMount(plan) {
             const runCmd = `docker run --rm --name ${containerName} ${volumeMounts} ${buildImageName} sh -c "${escapedCommand}"`;
 
             console.log(`   -> 실행 명령: ${runCmd.substring(0, 200)}...`);
-            console.log(`   -> 마운트 확인: 컨테이너 내부 ${appWorkDir}에 소스코드 마운트됨`);
+            console.log(`   -> 마운트: 컨테이너 내부 ${appWorkDir}에 소스코드 마운트됨`);
 
-            // 3. 컨테이너 실행 (빌드 수행) - 실시간 출력
+            // 3. 컨테이너 실행 (빌드 수행) - 실시간 출력, 5분 타임아웃
             console.log(`   -> 빌드 시작... (진행 상황이 표시됩니다)`);
-            const buildProcess = exec(runCmd, { timeout: 300000 }, (err, stdout, stderr) => { // 5분 타임아웃
+            const buildProcess = exec(runCmd, { timeout: 300000 }, (err, stdout, stderr) => {
                 // 빌드 완료 후 결과 평가
                 const buildOutput = stdout || '';
                 const buildErrors = stderr || '';
                 const allOutput = buildOutput + buildErrors;
 
                 if (err) {
-                    console.error(`\n   ❌ [BUILD ERROR]`);
+                    console.error(`\n   ❌ [빌드 에러]`);
                     console.error(`   ${(stderr || stdout || err.message).substring(0, 500)}`);
                     const errorMessage = stderr || stdout || err.message || '알 수 없는 빌드 오류';
                     return reject(new Error(errorMessage));
@@ -183,6 +206,9 @@ function runDockerBuildAndMount(plan) {
 
 /**
  * 빌드 성공 여부 평가
+ * @param {string} output - 빌드 출력 로그
+ * @param {Object} plan - 빌드 계획 객체
+ * @returns {boolean} 빌드 성공 여부
  */
 function evaluateBuildSuccess(output, plan) {
     const outputLower = output.toLowerCase();

@@ -1,27 +1,35 @@
-// orchestrator.js (최종 통합 버전)
+/**
+ * @fileoverview 메인 오케스트레이터 - LLM 기반 자동 빌드 및 배포 파이프라인
+ * @description 여러 LLM 에이전트가 협력하여 프로젝트의 분석, 빌드, 디버깅, 배포를 자동화
+ */
 
 // 환경 변수 로드 (.env 파일 지원)
 require('dotenv').config();
 
 const path = require('path');
 
-// 필요한 에이전트 모듈들을 불러옵니다.
-// 이 파일들은 orchestrator.js와 같은 폴더에 있어야 합니다.
+// 필요한 에이전트 모듈 임포트
 const { analyzeCodebase } = require('./AnalyzerAgent');
 const { runDockerBuildAndMount } = require('./BuilderAgent');
 const { deployToWebServer } = require('./DeployAgent');
 const { debugAndFixCode } = require('./DebuggerAgent');
 
-// 사용 가능한 프로젝트 목록 (실제 프로젝트 경로 포함)
+// 사용 가능한 프로젝트 목록
 const AVAILABLE_PROJECTS = [
     'task/html5',
-    'task/react/react-18',  // 실제 프로젝트 경로
+    'task/react/react-18',
     'task/react/react-17',
     'task/react/react-16',
     'task/vue3'
 ];
 
-// 랜덤하게 프로젝트 선택
+// 최대 수정 시도 횟수
+const MAX_ATTEMPTS = 10;
+
+/**
+ * 랜덤하게 프로젝트 선택
+ * @returns {string} 선택된 프로젝트 경로
+ */
 function selectRandomProject() {
     const randomIndex = Math.floor(Math.random() * AVAILABLE_PROJECTS.length);
     return AVAILABLE_PROJECTS[randomIndex];
@@ -30,11 +38,11 @@ function selectRandomProject() {
 // 프로젝트 디렉토리 정의 (랜덤 선택)
 const PROJECT_DIR_NAME = selectRandomProject();
 
-// 최대 수정 시도 횟수
-const MAX_ATTEMPTS = 10;
-
 /**
- * 🤖 다중 LLM 에이전트 배포 파이프라인의 핵심 제어 함수
+ * 다중 LLM 에이전트 배포 파이프라인 실행
+ * @description 프로젝트 분석, 빌드, 디버깅, 배포를 자동화하는 핵심 함수
+ * @async
+ * @returns {Promise<void>}
  */
 async function runDeploymentPipeline() {
     console.log("=== 🤖 다중 LLM 에이전트 배포 파이프라인 시작 ===");
@@ -57,11 +65,12 @@ async function runDeploymentPipeline() {
 
         while (attempt <= MAX_ATTEMPTS && !buildSuccess) {
             console.log(`\n=================================================`);
-            console.log(`   🔁 [라운드 ${attempt}] 빌드 시도 #${attempt} 시작 (프로젝트 경로: ${currentProjectPath})`);
+            console.log(`   🔁 [라운드 ${attempt}] 빌드 시도 #${attempt} 시작`);
+            console.log(`   프로젝트 경로: ${currentProjectPath}`);
             console.log(`=================================================`);
             
             try {
-                // 2. 🏗️ 빌드 및 실행 에이전트 호출
+                // 2. 빌드 및 실행 에이전트 호출
                 // 성공 시 artifactPath를 받고 루프 탈출
                 artifactPath = await runDockerBuildAndMount(currentPlan);
                 buildSuccess = true;
@@ -75,13 +84,13 @@ async function runDeploymentPipeline() {
                     throw new Error(`최대 수정 시도 횟수(${MAX_ATTEMPTS}회)를 초과했습니다. 자동 조치 실패.`);
                 }
 
-                // 3. 🩹 디버깅 및 수정 에이전트 호출
+                // 3. 디버깅 및 수정 에이전트 호출
                 console.log(`\n📋 [라운드 ${attempt}] 문제 해결 및 코드 수정 시작...`);
                 console.log(`   -> DebuggerAgent 호출 및 수정 시도...`);
                 
                 try {
-                // DebuggerAgent는 수정된 코드를 새 폴더에 저장하고, 빌드 테스트 후 새 경로를 반환합니다.
-                const modifiedProjectPath = await debugAndFixCode(currentProjectPath, error, currentPlan);
+                    // DebuggerAgent는 수정된 코드를 새 폴더에 저장하고, 빌드 테스트 후 새 경로를 반환
+                    const modifiedProjectPath = await debugAndFixCode(currentProjectPath, error, currentPlan);
                 
                 // 수정된 프로젝트로 경로와 계획 업데이트
                 currentProjectPath = modifiedProjectPath;
@@ -124,7 +133,7 @@ async function runDeploymentPipeline() {
             }
         }
 
-        // 4. 🚀 빌드 성공 시 배포 에이전트 호출
+        // 4. 빌드 성공 시 배포 에이전트 호출
         if (buildSuccess) {
             await deployToWebServer(artifactPath || currentPlan.sourceMountPath, currentPlan.type);
             console.log("\n=== 🎉 전체 파이프라인 성공적으로 완료됨 ===");

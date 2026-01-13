@@ -1,4 +1,7 @@
-// AnalyzerAgent.js - LLM 기반 코드베이스 분석
+/**
+ * @fileoverview AnalyzerAgent - LLM 기반 코드베이스 분석 에이전트
+ * @description 프로젝트 구조 분석, 빌드 도구 감지, Dockerfile 생성
+ */
 
 const fs = require('fs');
 const path = require('path');
@@ -6,6 +9,8 @@ const { callLLM } = require('./LLMService');
 
 /**
  * 프로젝트 구조를 읽어서 LLM에 전달할 컨텍스트 생성
+ * @param {string} projectPath - 분석할 프로젝트 경로
+ * @returns {Object} 프로젝트 컨텍스트 정보
  */
 function gatherProjectContext(projectPath) {
     const context = {
@@ -102,6 +107,9 @@ function gatherProjectContext(projectPath) {
 
 /**
  * 빌드 명령어 최적화 (lockfile 존재 여부에 따라 npm ci/npm install 선택)
+ * @param {string} buildCommand - 최적화할 빌드 명령어
+ * @param {string} projectPath - 프로젝트 경로
+ * @returns {string} 최적화된 빌드 명령어
  */
 function optimizeBuildCommand(buildCommand, projectPath) {
     if (!buildCommand) return buildCommand;
@@ -125,6 +133,8 @@ function optimizeBuildCommand(buildCommand, projectPath) {
 
 /**
  * 실제 프로젝트 경로 찾기 (package.json이 있는 폴더)
+ * @param {string} projectPath - 검색 시작 경로
+ * @returns {string} 실제 프로젝트 경로
  */
 function findActualProjectPath(projectPath) {
     // 현재 경로에 package.json이 있으면 그대로 반환
@@ -160,6 +170,8 @@ function findActualProjectPath(projectPath) {
 
 /**
  * LLM을 사용하여 코드베이스 분석 및 빌드 계획 수립
+ * @param {string} projectPath - 분석할 프로젝트 경로
+ * @returns {Promise<Object>} 빌드 계획 객체
  */
 async function analyzeCodebase(projectPath) {
     console.log("🔍 [AnalyzerAgent]: LLM 기반 소스코드 분석 및 도커 계획 수립 시작...");
@@ -326,6 +338,9 @@ CMD ["sh", "-c", "${plan.buildCommand}"]`;
 
 /**
  * LLM 실패 시 사용하는 기본 규칙 기반 분석
+ * @param {string} projectPath - 분석할 프로젝트 경로
+ * @param {Object} context - 프로젝트 컨텍스트 정보
+ * @returns {Object} 빌드 계획 객체
  */
 function fallbackAnalysis(projectPath, context) {
     // 실제 프로젝트 경로 찾기
