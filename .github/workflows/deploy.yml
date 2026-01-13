@@ -203,7 +203,13 @@ jobs:
             VERSION="${{ steps.version.outputs.VERSION }}"
             NOTES="${{ steps.release-notes.outputs.NOTES }}"
             TEXT="⚠️ AWEN Build Agent v${VERSION} 수동 배포 필요\n\n변경사항:\n${NOTES}\n\nDocker 이미지가 빌드되었습니다. 수동으로 배포를 진행해주세요."
-            echo "$TEXT" | python3 -c "import json, sys; print(json.dumps({'text': sys.stdin.read()}))" > /tmp/payload.json
+            echo "$TEXT" | python3 << 'PYEOF' > /tmp/payload.json
+          import json
+          import sys
+          text = sys.stdin.read()
+          payload = {'text': text}
+          print(json.dumps(payload, ensure_ascii=False))
+          PYEOF
             curl --insecure -k -s -X POST -H "Content-Type: application/json" -d @/tmp/payload.json "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           else
             echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
@@ -215,7 +221,13 @@ jobs:
             VERSION="${{ steps.version.outputs.VERSION }}"
             NOTES="${{ steps.release-notes.outputs.NOTES }}"
             TEXT="🚀 AWEN Build Agent v${VERSION} 배포 완료\n\n변경사항:\n${NOTES}"
-            echo "$TEXT" | python3 -c "import json, sys; print(json.dumps({'text': sys.stdin.read()}))" > /tmp/payload.json
+            echo "$TEXT" | python3 << 'PYEOF' > /tmp/payload.json
+          import json
+          import sys
+          text = sys.stdin.read()
+          payload = {'text': text}
+          print(json.dumps(payload, ensure_ascii=False))
+          PYEOF
             curl --insecure -k -s -X POST -H "Content-Type: application/json" -d @/tmp/payload.json "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           else
             echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
@@ -232,7 +244,13 @@ jobs:
           if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
             VERSION="${{ github.ref_name }}"
             TEXT="❌ AWEN Build Agent 배포 실패: ${VERSION}\n\n배포 중 오류가 발생했습니다."
-            echo "$TEXT" | python3 -c "import json, sys; print(json.dumps({'text': sys.stdin.read()}))" > /tmp/payload.json
+            echo "$TEXT" | python3 << 'PYEOF' > /tmp/payload.json
+          import json
+          import sys
+          text = sys.stdin.read()
+          payload = {'text': text}
+          print(json.dumps(payload, ensure_ascii=False))
+          PYEOF
             curl --insecure -k -s -X POST -H "Content-Type: application/json" -d @/tmp/payload.json "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           else
             echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
