@@ -126,6 +126,8 @@ jobs:
     name: Deploy and Webhook
     needs: docker
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 리포지토리에 푸시하기 위한 권한
 
     steps:
       - name: Extract Version from Tag
