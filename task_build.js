@@ -1,26 +1,90 @@
+/**
+ * @fileoverview Task Build Agent - 외부 API 기반 빌드 에이전트
+ * @description 외부 API에서 작업을 가져와 Git 클론 및 빌드 파이프라인 실행
+ */
+
 // 환경 변수 로드 (.env 파일 지원)
 require('dotenv').config();
-const path = require('path');
 
-// 필요한 에이전트 모듈들을 불러옵니다.
-// 이 파일들은 orchestrator.js와 같은 폴더에 있어야 합니다.
+const path = require('path');
+const simpleGit = require('simple-git');
+const { default: pLimit } = require('p-limit');
+
+// 필요한 에이전트 모듈 임포트
 const { analyzeCodebase } = require('./AnalyzerAgent');
 const { runDockerBuildAndMount } = require('./BuilderAgent');
 const { deployToWebServer } = require('./DeployAgent');
 const { debugAndFixCode } = require('./DebuggerAgent');
 const { getBuildTask, reportBuildResult } = require('./api.js');
-const simpleGit = require('simple-git');
 
-// 최대 수정 시도 횟수
-const MAX_ATTEMPTS = 1;
+// 설정 상수
+const POLL_INTERVAL = 5000; // 작업 없을 때 대기 시간 (밀리초)
+const MAX_CONCURRENT_TASKS = 2; // 최대 동시 작업 횟수
+const MAX_ATTEMPTS = 1; // 최대 수정 시도 횟수
 
-// Git 저장소를 특정 경로로 클론하는 함수
-async function gitClone(repo_url, token, targetPath) {
+const limit = pLimit(MAX_CONCURRENT_TASKS);
+
+/**
+ * 주기적으로 빌드 에이전트를 시작하는 함수
+ * @async
+ * @returns {Promise<void>}
+ */
+async function startAgent() {
+    console.log(`\n🚀 빌드 에이전트 시작 (기본 대기 간격: ${POLL_INTERVAL / 1000}초)`);
+    await processTask();
+}
+
+/**
+ * 작업을 처리하는 핵심 함수
+ * @async
+ * @returns {Promise<void>}
+ */
+async function processTask() {
     try {
-        console.log(`🚚 Git 클론 시작: ${repo_url} -> ${targetPath}`);
+
+        // 동시 작업이 최대치라면 대기
+        if (limit.activeCount >= MAX_CONCURRENT_TASKS) {
+            console.log(`⏳ 작업 슬롯 가득 참 (${limit.activeCount}/${MAX_CONCURRENT_TASKS}). 대기 중...`);
+            setTimeout(() => processTask(), POLL_INTERVAL);
+            return;
+        }
+
+        // 작업 탐색
+        const task = await getBuildTask();
+
+        if (!task) {
+            console.log(`\n💤 작업 없음. ${POLL_INTERVAL / 1000}초 대기...`);
+            setTimeout(() => processTask(), POLL_INTERVAL);
+            return;
+        }
+
+        console.log(`🔄 작업 있음. 다음 작업 확인...`);
+
+        limit(() => buildProject(task));
+        setTimeout(() => processTask(), 1000);
+
+
+    } catch (error) {
+        // 에러 발생 시 대기 후 재시도
+        console.error('❌ 실행 중 시스템 오류:', error.message);
+        setTimeout(() => processTask(), POLL_INTERVAL);
+    }
+}
+
+/**
+ * Git 저장소를 특정 경로로 클론하는 함수
+ * @param {string} repoUrl - Git 저장소 URL
+ * @param {string} token - 인증 토큰
+ * @param {string} targetPath - 클론할 대상 경로
+ * @async
+ * @returns {Promise<void>}
+ */
+async function gitClone(repoUrl, token, targetPath) {
+    try {
+        console.log(`🚚 Git 클론 시작: ${repoUrl} -> ${targetPath}`);
 
         const git = simpleGit();
-        const authRepoUrl = repo_url.replace(
+        const authRepoUrl = repoUrl.replace(
             'https://',
             `https://x-access-token:${token}@`
         );
@@ -35,20 +99,69 @@ async function gitClone(repo_url, token, targetPath) {
 
 /**
  * 에러 원인 판별 함수 (서비스 문제 OR 사용자 문제)
- * 모든 재시도 후에도 실패한 경우 호출
- * 
- * @param {Error} error 
- * @return {string} 'USER_ERROR' | 'SERVICE_ERROR'
+ * @param {Error|string} error - 에러 객체 또는 메시지
+ * @returns {Promise<string>} 'USER_ERROR' | 'SERVICE_ERROR'
  */
 async function determineErrorType(error) {
-    const errorMessage = error.message;
+    const msg = (error.message || '').toLowerCase();
 
-    // TODO: 에러 메세지 분석 로직 추가 필요
-    // 모듈, 코드, 버전, 환경 설정 문제 등 -> 사용자 문제
-    // 그 외는 서비스 문제
+    // 서비스 에러 키워드
+    // 디스크 부족, 도커 데몬 연결 실패, 내부 네트워크 타임아웃 등
+    const serviceKeywords = [
+        'no space left on device',
+        'enospc',
+        'connect enoent',
+        '/var/run/docker.sock',
+        'econnrefused',
+        'etimedout',
+        '500 internal server error',
+        '429 too many requests',
+        'docker daemon'
+    ];
+
+    // 사용자 에러 키워드
+    // 문법 에러, 모듈 미발견, 빌드 명령어 실패 등
+    const userKeywords = [
+        'module_not_found', 
+        'cannot find module', 
+        'syntaxerror', 
+        'referenceerror',
+        'typeerror', 
+        'npm err', 
+        'yarn error', 
+        'command failed', 
+        'exit code',
+        'failed to solve', 
+        'executor failed', 
+        'enoent', 
+        'unsupported engine',
+        'directory not found', 
+        '.env', 
+        'manifest not found', 
+        'pkg-config'
+    ];
+
+    if (serviceKeywords.some(keyword => msg.includes(keyword))) {
+        console.log('[ErrorType] 서비스 에러 감지됨');
+        return 'SERVICE_ERROR';
+    }
+
+    if (userKeywords.some(keyword => msg.includes(keyword))) {
+        console.log('[ErrorType] 사용자 코드/설정 에러 감지됨');
+        return 'USER_ERROR';
+    }
+
+    // 분류되지 않은 에러는 서비스 에러로 간주
+    console.log('[ErrorType] 원인 불명 (서비스 에러로 간주)');
+    return 'SERVICE_ERROR';
 }
 
-// 빌드 파이프라인 실행
+/**
+ * 빌드 파이프라인 실행
+ * @param {string} targetPath - 빌드할 프로젝트 경로
+ * @async
+ * @returns {Promise<Object>} 빌드 결과 객체
+ */
 async function runDeploymentPipeline(targetPath) {
     console.log("=== 🤖 다중 LLM 에이전트 배포 파이프라인 시작 ===");
     console.log(`선택된 프로젝트: ${targetPath}`);
@@ -63,6 +176,7 @@ async function runDeploymentPipeline(targetPath) {
         summary: '',
         error: ''
     };
+    let errorType = '';
 
     try {
         // 1. 초기 분석 실행 (비동기)
@@ -73,11 +187,12 @@ async function runDeploymentPipeline(targetPath) {
 
         while (attempt <= MAX_ATTEMPTS && !buildSuccess) {
             console.log(`\n=================================================`);
-            console.log(`   🔁 [라운드 ${attempt}] 빌드 시도 #${attempt} 시작 (프로젝트 경로: ${currentProjectPath})`);
+            console.log(`   🔁 [라운드 ${attempt}] 빌드 시도 #${attempt} 시작`);
+            console.log(`   프로젝트 경로: ${currentProjectPath}`);
             console.log(`=================================================`);
 
             try {
-                // 2. 🏗️ 빌드 및 실행 에이전트 호출
+                // 2. 빌드 및 실행 에이전트 호출
                 step = 'BUILD';
                 artifactPath = await runDockerBuildAndMount(currentPlan);
                 buildSuccess = true;
@@ -88,17 +203,18 @@ async function runDeploymentPipeline(targetPath) {
                 console.error(`   에러 내용: ${error.message || error}`);
 
                 if (attempt === MAX_ATTEMPTS) {
-                    // 에러 원인 판별 함수 호출 위치
-                    throw new Error(`최대 수정 시도 횟수(${MAX_ATTEMPTS}회)를 초과했습니다. 자동 조치 실패.`);
+                    // 에러 원인 판별
+                    errorType = await determineErrorType(error);
+                    throw new Error(`최대 수정 시도 횟수(${MAX_ATTEMPTS}회)를 초과했습니다. 자동 조치 실패. ${errorType}`);
                 }
 
-                // 3. 🩹 디버깅 및 수정 에이전트 호출
+                // 3. 디버깅 및 수정 에이전트 호출
                 step = 'DEBUG';
                 console.log(`\n📋 [라운드 ${attempt}] 문제 해결 및 코드 수정 시작...`);
                 console.log(`   -> DebuggerAgent 호출 및 수정 시도...`);
 
                 try {
-                    // DebuggerAgent는 수정된 코드를 새 폴더에 저장하고, 빌드 테스트 후 새 경로를 반환합니다.
+                    // DebuggerAgent는 수정된 코드를 새 폴더에 저장하고, 빌드 테스트 후 새 경로를 반환
                     const modifiedProjectPath = await debugAndFixCode(currentProjectPath, error, currentPlan);
 
                     // 수정된 프로젝트로 경로와 계획 업데이트
@@ -142,7 +258,7 @@ async function runDeploymentPipeline(targetPath) {
             }
         }
 
-        // 4. 🚀 빌드 성공 시 배포 에이전트 호출
+        // 4. 빌드 성공 시 배포 에이전트 호출
         if (buildSuccess) {
             step = 'DEPLOY';
             await deployToWebServer(artifactPath || currentPlan.sourceMountPath, currentPlan.type);
@@ -157,7 +273,6 @@ async function runDeploymentPipeline(targetPath) {
                 summary: `전체 파이프라인 완료`
             },
             deploy_info: {
-                currentProjectPath: currentProjectPath,
                 artifactDir: currentPlan.artifactDir,
                 artifactPath: artifactPath,
             },
@@ -169,37 +284,36 @@ async function runDeploymentPipeline(targetPath) {
         if (error.stack) {
             console.error(`스택 트레이스:\n${error.stack}`);
         }
-        console.log("=================================================");
 
-        logs.summary = `자동 빌드 및 디버깅 실패`;
-
-        // 단계별 에러 메세지
-        if (step === 'ANALYSIS' || step === 'BUILD') {
-            logs.error = `error_message: ${error.message}\nstack_trace: ${error.stack}`;
+        if (step === "DEBUG") {
+            logs.summary = `자동 빌드 및 디버깅 실패 (원인: ${errorType})`;
+        } else {
+            logs.summary = `자동 빌드 및 디버깅 실패`;
         }
 
-        if (step === 'DEBUG') {
-            logs.error = error.message;
-            //TODO: 디버깅 에러 메세지 추가 (문제의 파일, 라인 등)
-        }
-
-        if (step === 'DEPLOY') {
-            logs.error = error.message;
-        }
+        logs.error = error.message;
 
         return {
             status: 'FAILED',
             step: step,
-            logs: logs
+            logs: logs,
         };
     }
 }
 
-// 클론 및 빌드 실행 함수
-async function buildProject() {
+/**
+ * 클론 및 빌드 실행 함수
+ * @param {Object} task - 빌드 작업 정보
+ * @param {string} task.repo_url - Git 저장소 URL
+ * @param {string} task.token - 인증 토큰
+ * @param {string} task.id - 작업 ID
+ * @param {string} task.user_id - 사용자 ID
+ * @param {string} task.hosting_id - 호스팅 ID
+ * @async
+ * @returns {Promise<void>}
+ */
+async function buildProject(task) {
     try {
-        const task = await getBuildTask();
-
         const repoName = task.repo_url.split('/').pop().replace('.git', '');
         const targetPath = path.join(__dirname, 'cloned_projects', `${repoName}-${Date.now()}`);
 
@@ -229,7 +343,7 @@ async function buildProject() {
 }
 
 // 마스터 에이전트 실행 시작
-buildProject().catch((error) => {
+startAgent().catch((error) => {
     console.error("\n💥 치명적 오류: 파이프라인 실행 중 예기치 않은 오류 발생");
     console.error(`오류: ${error.message}`);
     if (error.stack) {

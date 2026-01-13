@@ -1,21 +1,26 @@
-// LLMService.js - LLM API 통합 서비스
+/**
+ * @fileoverview LLMService - LLM API 통합 서비스
+ * @description OpenAI와 Anthropic API를 통합하여 관리
+ */
 
 const https = require('https');
 
-// 환경 변수에서 API 키 가져오기 (기본값: OpenAI)
+// 환경 변수에서 API 키 가져오기
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY;
-const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai'; // 'openai' 또는 'anthropic'
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
+
 // 모델 설정 (기본값: nano - 가장 작은 모델)
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-nano'; // nano 모델
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-nano';
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-haiku-20240307';
 
 /**
  * LLM API 호출 함수
  * @param {string} prompt - LLM에 전달할 프롬프트
- * @param {string} systemPrompt - 시스템 프롬프트 (선택적)
- * @param {string} context - 호출 컨텍스트 (에이전트 이름 등, 선택적)
- * @returns {Promise<{response: string, usage: object}>} - LLM 응답과 토큰 사용량
+ * @param {string} [systemPrompt=null] - 시스템 프롬프트
+ * @param {string} [context='LLM'] - 호출 컨텍스트 (에이전트 이름 등)
+ * @param {number} [timeout=60000] - 타임아웃 (밀리초)
+ * @returns {Promise<{response: string, usage: Object}>} LLM 응답과 토큰 사용량
  */
 async function callLLM(prompt, systemPrompt = null, context = 'LLM', timeout = 60000) {
     if (!OPENAI_API_KEY && !ANTHROPIC_API_KEY) {
@@ -49,6 +54,11 @@ async function callLLM(prompt, systemPrompt = null, context = 'LLM', timeout = 6
 
 /**
  * OpenAI API 호출
+ * @param {string} prompt - 프롬프트
+ * @param {string} systemPrompt - 시스템 프롬프트
+ * @param {string} context - 컨텍스트
+ * @param {Object} inputData - 입력 데이터 정보
+ * @returns {Promise<{response: string, usage: Object}>}
  */
 async function callOpenAIAPI(prompt, systemPrompt, context, inputData) {
     return new Promise((resolve, reject) => {
@@ -59,14 +69,14 @@ async function callOpenAIAPI(prompt, systemPrompt, context, inputData) {
         messages.push({ role: 'user', content: prompt });
 
         // 모델에 따라 올바른 파라미터 사용
-        // 최신 OpenAI 모델들은 max_completion_tokens를 사용해야 함
+        // 최신 OpenAI 모델들은 max_completion_tokens를 사용
         const requestBody = {
-            model: OPENAI_MODEL, // 기본값: gpt-3.5-turbo (nano)
+            model: OPENAI_MODEL,
             messages: messages,
             temperature: 1
         };
         
-        // 기본적으로 max_completion_tokens 사용 (최신 모델 대부분 지원)
+        // 기본적으로 max_completion_tokens 사용 (최신 모델 지원)
         // 구형 모델만 max_tokens 사용
         const modelLower = OPENAI_MODEL.toLowerCase();
         const isLegacyModel = modelLower.startsWith('gpt-4') && 
@@ -78,7 +88,7 @@ async function callOpenAIAPI(prompt, systemPrompt, context, inputData) {
             // 구형 모델만 max_tokens 사용
             requestBody.max_tokens = 2000;
         } else {
-            // 최신 모델은 max_completion_tokens 사용 (기본값)
+            // 최신 모델은 max_completion_tokens 사용
             requestBody.max_completion_tokens = 2000;
         }
         
@@ -158,12 +168,17 @@ async function callOpenAIAPI(prompt, systemPrompt, context, inputData) {
 
 /**
  * Anthropic Claude API 호출
+ * @param {string} prompt - 프롬프트
+ * @param {string} systemPrompt - 시스템 프롬프트
+ * @param {string} context - 컨텍스트
+ * @param {Object} inputData - 입력 데이터 정보
+ * @returns {Promise<{response: string, usage: Object}>}
  */
 async function callAnthropicAPI(prompt, systemPrompt, context, inputData) {
     return new Promise((resolve, reject) => {
         const messages = [{ role: 'user', content: prompt }];
         const body = {
-            model: ANTHROPIC_MODEL, // 기본값: claude-3-haiku (가장 작은 모델)
+            model: ANTHROPIC_MODEL,
             max_tokens: 2000,
             messages: messages
         };

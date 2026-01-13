@@ -1,0 +1,228 @@
+name: Deploy on Version Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22]
+    
+    steps:
+      - name: Set up Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - uses: actions/checkout@v4
+
+      - name: Extract Version from Tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "RELEASE_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Version: $VERSION"
+
+      - name: Build Test
+        run: |
+          echo "📦 Installing dependencies..."
+          npm ci
+          echo "✅ Dependencies installed"
+          
+          echo "🧪 Testing if code runs without errors..."
+          node -e "
+            try {
+              console.log('Testing all modules...');
+              require('./AnalyzerAgent');
+              require('./BuilderAgent');
+              require('./DebuggerAgent');
+              require('./DeployAgent');
+              require('./LLMService');
+              require('./api');
+              require('./server');
+              require('./task_build');
+              console.log('✅ All modules load successfully - No execution errors');
+              process.exit(0);
+            } catch (error) {
+              console.error('❌ Execution error:', error.message);
+              process.exit(1);
+            }
+          "
+          
+          echo "✅ Build test passed"
+
+  docker:
+    name: Build and Push Docker Image
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Extract Version from Tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "RELEASE_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Version: $VERSION"
+      
+      - name: Verify Build
+        run: |
+          ls -al
+          test -f package.json || exit 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      
+      - name: Install Dependencies
+        run: |
+          npm ci --only=production
+          ls -al
+        
+      - name: Login to Harbor Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          username: ${{ secrets.HARBOR_BOT_ID }}
+          password: ${{ secrets.HARBOR_BOT_PW }}
+      
+      - name: Build Docker Image
+        run: |
+          # Create Dockerfile if not exists
+          if [ ! -f Dockerfile ]; then
+            cat > Dockerfile << 'EOF'
+          FROM node:20-alpine
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci --only=production
+          COPY *.js ./
+          COPY task ./task
+          ENV NODE_ENV=production
+          EXPOSE 3000
+          CMD ["node", "index.js"]
+          EOF
+          fi
+          
+          docker build . --file Dockerfile --tag ${{ secrets.HARBOR_REGISTRY }}/awen/build-agent:${{ steps.version.outputs.VERSION }} --tag ${{ secrets.HARBOR_REGISTRY }}/awen/build-agent:latest
+      
+      - name: Push Docker Image
+        run: |
+          docker push ${{ secrets.HARBOR_REGISTRY }}/awen/build-agent:${{ steps.version.outputs.VERSION }}
+          docker push ${{ secrets.HARBOR_REGISTRY }}/awen/build-agent:latest
+
+  deploy:
+    name: Deploy and Webhook
+    needs: docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 리포지토리에 푸시하기 위한 권한
+
+    steps:
+      - name: Extract Version from Tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+      
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge to main branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Get the commit SHA that the tag points to
+          TAG_SHA=$(git rev-parse ${{ github.ref }})
+          echo "Tag SHA: $TAG_SHA"
+          
+          # Fetch main branch
+          git fetch origin main:main || git fetch origin main
+          
+          # Checkout main branch
+          git checkout main
+          git pull origin main || true
+          
+          # Check if the commit is already in main
+          if git merge-base --is-ancestor $TAG_SHA main; then
+            echo "Tag commit is already in main branch, skipping merge"
+          else
+            # Merge the tag commit into main
+            git merge --no-ff $TAG_SHA -m "Merge tag ${{ github.ref_name }} into main"
+            
+            # Push with authentication using GITHUB_TOKEN
+            git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+            git push origin main
+            echo "✅ Merged tag ${{ github.ref_name }} into main branch"
+          fi
+
+      - name: Get Release Notes
+        id: release-notes
+        run: |
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            # If no previous tag, get last 20 commits
+            NOTES=$(git log --pretty=format:"- %s (%h)" -20)
+          else
+            # Get commits between last tag and current tag
+            NOTES=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)")
+          fi
+          echo "NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Trigger Deployment Webhook
+        run: |
+          if [ -n "${{ secrets.WEB_HOOK_TARGET }}" ]; then
+            curl --insecure -k -s -d "payload={\"version\":\"${{ steps.version.outputs.VERSION }}\",\"service\":\"build-agent\"}" "${{ secrets.WEB_HOOK_TARGET }}"
+          else
+            echo "WEB_HOOK_TARGET secret not set, skipping webhook"
+          fi
+
+      - name: Send Google Chat Notification
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
+            VERSION="${{ steps.version.outputs.VERSION }}"
+            NOTES="${{ steps.release-notes.outputs.NOTES }}"
+            TEXT="🚀 AWEN Build Agent v${VERSION} 배포 완료\n\n변경사항:\n${NOTES}"
+            PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'text': sys.argv[1]}))" "$TEXT")
+            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          else
+            echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
+          fi
+
+  notify-failure:
+    name: Notify on Failure
+    needs: [build, docker, deploy]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Failure Notification
+        run: |
+          if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
+            VERSION="${{ github.ref_name }}"
+            TEXT="❌ AWEN Build Agent 배포 실패: ${VERSION}\n\n배포 중 오류가 발생했습니다."
+            PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'text': sys.argv[1]}))" "$TEXT")
+            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          else
+            echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
+          fi
+
