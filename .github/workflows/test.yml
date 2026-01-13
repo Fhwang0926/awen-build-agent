@@ -18,6 +18,8 @@ jobs:
   check-changes:
     name: Check Changes
     runs-on: ubuntu-latest
+    # Dependabot PR 제외
+    if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]'
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       is-deploy-pr: ${{ steps.check-deploy.outputs.is-deploy-pr }}
@@ -113,11 +115,15 @@ jobs:
   build-test:
     name: Build Test
     needs: check-changes
+    # Dependabot PR 제외
     # PR인 경우 항상 실행 (특히 deploy 브랜치로의 PR은 항상 전체 테스트)
     # Push인 경우 변경사항이 있을 때만 실행
     if: |
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'push' && needs.check-changes.outputs.backend == 'true')
+      (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') &&
+      (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'push' && needs.check-changes.outputs.backend == 'true')
+      )
     runs-on: ubuntu-latest
     
     steps:
@@ -262,7 +268,8 @@ jobs:
 
   update-pr-description:
     name: Update PR Description
-    if: github.event_name == 'pull_request'
+    # Dependabot PR 제외
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
     needs: [check-changes]
     runs-on: ubuntu-latest
     permissions:
