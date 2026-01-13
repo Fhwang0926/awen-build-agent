@@ -203,7 +203,7 @@ jobs:
           if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
             VERSION="${{ steps.version.outputs.VERSION }}"
             WEBHOOK_URL="${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
-            curl -X POST \
+            curl --globoff -X POST \
               -H 'Content-Type: application/json; charset=UTF-8' \
               -d "{\"text\": \"🚀 AWEN Build Agent v${VERSION} 배포 완료\"}" \
               "$WEBHOOK_URL"
@@ -223,7 +223,7 @@ jobs:
           if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
             VERSION="${{ github.ref_name }}"
             WEBHOOK_URL="${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
-            curl -X POST \
+            curl --globoff -X POST \
               -H 'Content-Type: application/json; charset=UTF-8' \
               -d "{\"text\": \"❌ AWEN Build Agent 배포 실패: ${VERSION}\n\n배포 중 오류가 발생했습니다.\"}" \
               "$WEBHOOK_URL"
