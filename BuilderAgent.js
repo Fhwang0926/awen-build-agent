@@ -118,15 +118,21 @@ function runDockerBuildAndMount(plan) {
                                     const fallbackPath = path.join(plan.sourceMountPath, dirName);
 
                                     if (fs.existsSync(fallbackPath)) {
-                                        const files = fs.readdirSync(fallbackPath);
-                                        console.log(`   -> 빌드 결과물 확인 (${dirName}): ${files.length}개 파일 생성됨`);
-                                        if (files.length > 0) {
-                                            console.log(`      주요 파일: ${files.slice(0, 5).join(', ')}`);
+                                        const fallbackFiles = fs.readdirSync(fallbackPath);
+                                        console.log(`   -> 빌드 결과물 확인 (${dirName}): ${fallbackFiles.length}개 파일 생성됨`);
+                                        if (fallbackFiles.length > 0) {
+                                            console.log(`      주요 파일: ${fallbackFiles.slice(0, 5).join(', ')}`);
+
+                                            // 발견된 경로 내의 파일들을 temp_build/artifact_output 폴더로 복사
+                                            const destinationPath = path.join(tempDir, 'artifact_output', buildImageName);
+                                            if (!fs.existsSync(destinationPath)) fs.mkdirSync(destinationPath, { recursive: true });
+
+                                            console.log(`   -> 결과물을 임시 폴더로 복사 중: ${fallbackPath} -> ${destinationPath}`);
+                                            copyRecursiveSync(fallbackPath, destinationPath);
                                         }
 
-                                        // 여기서 발견된 경로로 결과물 반환
-                                        const resultPath = path.join(plan.sourceMountPath, dirName);
-                                        resolve(resultPath);
+                                        // 복사된 경로로 결과물 반환
+                                        resolve(path.join(tempDir, 'artifact_output', buildImageName));
                                         return;
                                     }
                                 }

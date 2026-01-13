@@ -74,6 +74,9 @@ async function gitClone(repo_url, token, targetPath) {
             '--config', `http.extraheader=Authorization: Basic ${base64Token}`
         ]);
 
+        // 해당 폴더의 설정에서 헤더 제거
+        await git.raw(['config', '--local', '--unset', 'http.extraheader']);
+
         console.log('✅ Git clone 완료');
     } catch (error) {
         console.error('❌ Clone 중 에러 발생:', error);
@@ -181,7 +184,6 @@ async function runDeploymentPipeline(targetPath) {
                 console.error(`   에러 내용: ${error.message || error}`);
 
                 if (attempt === MAX_ATTEMPTS) {
-                    // 에러 원인 판별 함수 호출 위치
                     errorType = await determineErrorType(error);
                     throw new Error(`최대 수정 시도 횟수(${MAX_ATTEMPTS}회)를 초과했습니다. 자동 조치 실패. ${errorType}`);
                 }
