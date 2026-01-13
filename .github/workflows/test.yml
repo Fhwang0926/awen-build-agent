@@ -119,16 +119,8 @@ jobs:
       github.event_name == 'pull_request' ||
       (github.event_name == 'push' && needs.check-changes.outputs.backend == 'true')
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: [20, 22]
     
     steps:
-      - name: Set Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -143,13 +135,22 @@ jobs:
           npm ci
           echo "✅ Dependencies installed"
 
-      - name: Build Test - Verify Execution
+      - name: Set up Node.js 20
+        if: |
+          needs.check-changes.outputs.is-deploy-pr == 'true' ||
+          needs.check-changes.outputs.backend == 'true' ||
+          github.event_name == 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Test - Verify Execution (Node.js 20)
         if: |
           needs.check-changes.outputs.is-deploy-pr == 'true' ||
           needs.check-changes.outputs.backend == 'true' ||
           github.event_name == 'pull_request'
         run: |
-          echo "🧪 Testing if code runs without errors..."
+          echo "🧪 Testing with Node.js 20..."
           
           # Test main modules load without errors
           node -e "
@@ -175,17 +176,70 @@ jobs:
               console.log('Testing Server...');
               require('./server');
               
-              console.log('✅ All modules load successfully without errors');
+              console.log('✅ All modules load successfully without errors (Node.js 20)');
               process.exit(0);
             } catch (error) {
-              console.error('❌ Execution error detected:');
+              console.error('❌ Execution error detected (Node.js 20):');
               console.error('  ', error.message);
               console.error('  at', error.stack.split('\\n')[1]?.trim());
               process.exit(1);
             }
           "
           
-          echo "✅ Build test passed - No execution errors"
+          echo "✅ Build test passed with Node.js 20"
+
+      - name: Set up Node.js 22
+        if: |
+          needs.check-changes.outputs.is-deploy-pr == 'true' ||
+          needs.check-changes.outputs.backend == 'true' ||
+          github.event_name == 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build Test - Verify Execution (Node.js 22)
+        if: |
+          needs.check-changes.outputs.is-deploy-pr == 'true' ||
+          needs.check-changes.outputs.backend == 'true' ||
+          github.event_name == 'pull_request'
+        run: |
+          echo "🧪 Testing with Node.js 22..."
+          
+          # Test main modules load without errors
+          node -e "
+            try {
+              console.log('Testing AnalyzerAgent...');
+              require('./AnalyzerAgent');
+              
+              console.log('Testing BuilderAgent...');
+              require('./BuilderAgent');
+              
+              console.log('Testing DebuggerAgent...');
+              require('./DebuggerAgent');
+              
+              console.log('Testing DeployAgent...');
+              require('./DeployAgent');
+              
+              console.log('Testing LLMService...');
+              require('./LLMService');
+              
+              console.log('Testing API...');
+              require('./api');
+              
+              console.log('Testing Server...');
+              require('./server');
+              
+              console.log('✅ All modules load successfully without errors (Node.js 22)');
+              process.exit(0);
+            } catch (error) {
+              console.error('❌ Execution error detected (Node.js 22):');
+              console.error('  ', error.message);
+              console.error('  at', error.stack.split('\\n')[1]?.trim());
+              process.exit(1);
+            }
+          "
+          
+          echo "✅ Build test passed with Node.js 22"
 
       - name: Test Summary
         if: always()
@@ -193,7 +247,7 @@ jobs:
           echo "## 🧪 Build Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 테스트 결과" >> $GITHUB_STEP_SUMMARY
-          echo "- Node.js: ${{ matrix.node }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Node.js: 20, 22" >> $GITHUB_STEP_SUMMARY
           echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ job.status }}" = "success" ]; then
