@@ -1,5 +1,8 @@
 # 🤖 Awen Build Agent
 
+[![Build Test](https://github.com/YOUR_USERNAME/awen-build-agent/actions/workflows/test.yml/badge.svg)](https://github.com/YOUR_USERNAME/awen-build-agent/actions/workflows/test.yml)
+[![Deploy](https://github.com/YOUR_USERNAME/awen-build-agent/actions/workflows/deploy.yml/badge.svg)](https://github.com/YOUR_USERNAME/awen-build-agent/actions/workflows/deploy.yml)
+
 LLM 기반 자동 빌드 및 배포 에이전트 시스템
 
 ## 📋 개요
@@ -199,6 +202,94 @@ awen-build-agent/
 - 총 토큰 수
 - 응답 길이
 
+## 🚀 CI/CD (GitHub Actions)
+
+### 자동 빌드 테스트
+
+#### Push 이벤트 (main, develop, deploy, dev/**)
+해당 브랜치에 푸시하면 변경사항을 감지하여 자동으로 빌드 테스트가 실행됩니다:
+
+```bash
+git push origin deploy
+```
+
+**실행되는 테스트:**
+- 변경된 파일 자동 감지
+- Node.js 20, 22 버전에서 테스트
+- 의존성 설치 검증
+- 모든 모듈 실행 오류 검증
+- ✅ **에러 없이 실행되는지만 확인**
+
+#### Pull Request 생성 시
+PR을 생성하면 자동으로 다음이 실행됩니다:
+
+**1. PR 본문 자동 생성:**
+- 📝 커밋 내역 자동 추가
+- 📁 변경된 파일 목록 (Backend/Task Projects/설정)
+- 📊 변경 통계
+- ✅ 체크리스트
+
+**2. 자동 실행 검증:**
+- Deploy PR인 경우 전체 검증 실행
+- Backend 변경 시 실행 검증 (Node.js 20, 22)
+- 모든 모듈이 에러 없이 로드되는지 확인
+- 테스트 결과 요약
+
+### 버전 태그 및 배포
+
+#### 수동 태그 생성
+GitHub Actions 탭에서 "Auto Create Version Tag" 워크플로우를 실행:
+
+1. GitHub 저장소 → Actions 탭
+2. "Auto Create Version Tag" 선택
+3. "Run workflow" 클릭
+4. 버전 타입 선택 (major/minor/patch)
+5. 실행
+
+#### v 태그로 자동 배포
+`v*` 형식의 태그를 푸시하면 자동으로 배포가 실행됩니다:
+
+```bash
+# 태그 생성
+git tag v1.0.0
+
+# 태그 푸시
+git push origin v1.0.0
+```
+
+**배포 프로세스:**
+1. 빌드 및 테스트 (Node.js 20, 22)
+2. Docker 이미지 빌드 및 푸시
+3. GitHub Release 자동 생성
+4. 배포 웹훅 트리거 (설정된 경우)
+5. 알림 전송 (설정된 경우)
+
+### GitHub Secrets 설정
+
+다음 Secrets를 설정하면 추가 기능이 활성화됩니다:
+
+#### Docker Registry (선택)
+```
+DOCKER_REGISTRY=harbor.example.com
+DOCKER_USERNAME=your-username
+DOCKER_PASSWORD=your-password
+```
+
+#### 배포 웹훅 (선택)
+```
+DEPLOY_WEBHOOK_URL=https://your-deploy-webhook.com/deploy
+```
+
+#### 알림 웹훅 (선택)
+```
+NOTIFICATION_WEBHOOK=https://chat.googleapis.com/v1/spaces/xxx/messages?key=xxx
+```
+
+설정 방법:
+1. GitHub 저장소 → Settings → Secrets and variables → Actions
+2. "New repository secret" 클릭
+3. Secret 이름과 값 입력
+
 ## 🐛 문제 해결
 
 ### 빌드가 계속 실패하는 경우
@@ -215,6 +306,13 @@ awen-build-agent/
 ### LLM 응답이 비어있는 경우
 
 타임아웃(60초)이 발생하거나 LLM API 오류일 수 있습니다. 기본 규칙 기반 분석으로 자동 폴백됩니다.
+
+### GitHub Actions 실패 시
+
+1. Actions 탭에서 실패한 워크플로우 확인
+2. 로그를 확인하여 실패 원인 파악
+3. 필요한 Secrets가 설정되어 있는지 확인
+4. Node.js 버전 호환성 확인
 
 ## 📝 라이선스
 

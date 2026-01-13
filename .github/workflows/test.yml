@@ -1,0 +1,411 @@
+name: Build Test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+      - develop
+      - deploy
+      - 'dev/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-changes:
+    name: Check Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      is-deploy-pr: ${{ steps.check-deploy.outputs.is-deploy-pr }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if PR to deploy branch
+        id: check-deploy
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ "${{ github.base_ref }}" = "deploy" ]; then
+            echo "is-deploy-pr=true" >> $GITHUB_OUTPUT
+          else
+            echo "is-deploy-pr=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check Changed Files
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # For PR, use merge-base
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+            HEAD_REF="${{ github.event.pull_request.head.ref }}"
+            
+            git fetch origin ${BASE_REF}:${BASE_REF} || true
+            git fetch origin ${HEAD_REF}:${HEAD_REF} || true
+            
+            BASE_SHA=$(git merge-base origin/${BASE_REF} origin/${HEAD_REF} 2>/dev/null || echo "${{ github.event.pull_request.base.sha }}")
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            
+            echo "PR: Base ref: ${BASE_REF}, Head ref: ${HEAD_REF}"
+            echo "PR: Base SHA: ${BASE_SHA}, Head SHA: ${HEAD_SHA}"
+            
+            if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "null" ]; then
+              BASE_SHA="origin/${BASE_REF}"
+            fi
+            if [ -z "$HEAD_SHA" ] || [ "$HEAD_SHA" = "null" ]; then
+              HEAD_SHA="origin/${HEAD_REF}"
+            fi
+          else
+            # For push events
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+            
+            echo "Push: Base SHA: ${BASE_SHA}, Head SHA: ${HEAD_SHA}"
+            
+            if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+                BASE_SHA="HEAD~1"
+              else
+                BASE_SHA="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+              fi
+            fi
+          fi
+          
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only ${BASE_SHA}..${HEAD_SHA} 2>/dev/null || echo "")
+          
+          if [ -z "$CHANGED_FILES" ] && [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only origin/${BASE_REF}...${HEAD_SHA} 2>/dev/null || echo "")
+          fi
+          
+          # Check for backend changes
+          if [ -n "$CHANGED_FILES" ]; then
+            BACKEND_MATCHES=$(echo "$CHANGED_FILES" | grep -E '(\.(js|json)$|^task/|\.github/workflows/)' || true)
+            
+            if [ -n "$BACKEND_MATCHES" ]; then
+              BACKEND_COUNT=$(echo "$BACKEND_MATCHES" | wc -l | xargs)
+            else
+              BACKEND_COUNT=0
+            fi
+          else
+            BACKEND_COUNT=0
+          fi
+          
+          BACKEND_COUNT=$(echo "$BACKEND_COUNT" | xargs)
+          BACKEND_COUNT=${BACKEND_COUNT:-0}
+          
+          echo "Changed files count - Backend: $BACKEND_COUNT"
+          echo "Changed files:"
+          echo "$CHANGED_FILES" | head -20
+          
+          # Set outputs
+          if [ "$BACKEND_COUNT" != "0" ]; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-test:
+    name: Build Test
+    needs: check-changes
+    # PR인 경우 항상 실행 (특히 deploy 브랜치로의 PR은 항상 전체 테스트)
+    # Push인 경우 변경사항이 있을 때만 실행
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' && needs.check-changes.outputs.backend == 'true')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    
+    steps:
+      - name: Set Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Test - Install Dependencies
+        if: |
+          needs.check-changes.outputs.is-deploy-pr == 'true' ||
+          needs.check-changes.outputs.backend == 'true' ||
+          github.event_name == 'pull_request'
+        run: |
+          echo "📦 Installing dependencies..."
+          npm ci
+          echo "✅ Dependencies installed"
+
+      - name: Build Test - Verify Execution
+        if: |
+          needs.check-changes.outputs.is-deploy-pr == 'true' ||
+          needs.check-changes.outputs.backend == 'true' ||
+          github.event_name == 'pull_request'
+        run: |
+          echo "🧪 Testing if code runs without errors..."
+          
+          # Test main modules load without errors
+          node -e "
+            try {
+              console.log('Testing AnalyzerAgent...');
+              require('./AnalyzerAgent');
+              
+              console.log('Testing BuilderAgent...');
+              require('./BuilderAgent');
+              
+              console.log('Testing DebuggerAgent...');
+              require('./DebuggerAgent');
+              
+              console.log('Testing DeployAgent...');
+              require('./DeployAgent');
+              
+              console.log('Testing LLMService...');
+              require('./LLMService');
+              
+              console.log('Testing API...');
+              require('./api');
+              
+              console.log('Testing Server...');
+              require('./server');
+              
+              console.log('✅ All modules load successfully without errors');
+              process.exit(0);
+            } catch (error) {
+              console.error('❌ Execution error detected:');
+              console.error('  ', error.message);
+              console.error('  at', error.stack.split('\\n')[1]?.trim());
+              process.exit(1);
+            }
+          "
+          
+          echo "✅ Build test passed - No execution errors"
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## 🧪 Build Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 테스트 결과" >> $GITHUB_STEP_SUMMARY
+          echo "- Node.js: ${{ matrix.node }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 상태: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ **모든 모듈이 에러 없이 로드되었습니다**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **실행 에러가 발견되었습니다**" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ needs.check-changes.outputs.is-deploy-pr }}" = "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🚀 **Deploy PR**: 전체 테스트 실행됨" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  update-pr-description:
+    name: Update PR Description
+    if: github.event_name == 'pull_request'
+    needs: [check-changes]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get PR Information
+        id: pr-info
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          HEAD_BRANCH="${{ github.event.pull_request.head.ref }}"
+          
+          echo "PR_NUMBER=pr_${PR_NUMBER}" >> $GITHUB_OUTPUT
+          echo "BASE_BRANCH=$BASE_BRANCH" >> $GITHUB_OUTPUT
+          echo "HEAD_BRANCH=$HEAD_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Get Changed Files
+        id: changed-files
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          HEAD_REF="${{ github.event.pull_request.head.ref }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          
+          git fetch origin ${BASE_REF}:${BASE_REF} || true
+          git fetch origin ${HEAD_REF}:${HEAD_REF} || true
+          MERGE_BASE=$(git merge-base origin/${BASE_REF} origin/${HEAD_REF} 2>/dev/null || echo "${{ github.event.pull_request.base.sha }}")
+          
+          CHANGED_FILES=$(git diff --name-only ${MERGE_BASE}..${HEAD_SHA} 2>/dev/null || echo "")
+          
+          BACKEND_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(js|json)$' || echo "")
+          TASK_FILES=$(echo "$CHANGED_FILES" | grep '^task/' || echo "")
+          CONFIG_FILES=$(echo "$CHANGED_FILES" | grep -E '(\.yml$|\.yaml$|\.md$|\.env)' || echo "")
+          
+          # Count files safely
+          BACKEND_COUNT=$(echo "$BACKEND_FILES" | grep -v '^$' | wc -l | xargs)
+          TASK_COUNT=$(echo "$TASK_FILES" | grep -v '^$' | wc -l | xargs)
+          CONFIG_COUNT=$(echo "$CONFIG_FILES" | grep -v '^$' | wc -l | xargs)
+          TOTAL_COUNT=$(echo "$CHANGED_FILES" | grep -v '^$' | wc -l | xargs)
+          
+          # Set outputs with string prefix
+          echo "BACKEND_COUNT=count_${BACKEND_COUNT:-0}" >> $GITHUB_OUTPUT
+          echo "TASK_COUNT=count_${TASK_COUNT:-0}" >> $GITHUB_OUTPUT
+          echo "CONFIG_COUNT=count_${CONFIG_COUNT:-0}" >> $GITHUB_OUTPUT
+          echo "TOTAL_COUNT=count_${TOTAL_COUNT:-0}" >> $GITHUB_OUTPUT
+          
+          echo "BACKEND_FILES<<EOF" >> $GITHUB_OUTPUT
+          echo "$BACKEND_FILES" | head -20 >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "TASK_FILES<<EOF" >> $GITHUB_OUTPUT
+          echo "$TASK_FILES" | head -20 >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "CONFIG_FILES<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONFIG_FILES" | head -20 >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Get Commits
+        id: commits
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          HEAD_REF="${{ github.event.pull_request.head.ref }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          
+          git fetch origin ${BASE_REF}:${BASE_REF} || true
+          git fetch origin ${HEAD_REF}:${HEAD_REF} || true
+          
+          MERGE_BASE=$(git merge-base origin/${BASE_REF} origin/${HEAD_REF} 2>/dev/null || echo "origin/${BASE_REF}")
+          
+          COMMITS=$(git log ${MERGE_BASE}..${HEAD_SHA} --pretty=format:"- %s (%h)" 2>/dev/null || echo "")
+          COMMIT_COUNT=$(git rev-list --count ${MERGE_BASE}..${HEAD_SHA} 2>/dev/null || echo "0")
+          
+          COMMIT_COUNT=$(echo "$COMMIT_COUNT" | tr -d '[:space:]')
+          COMMIT_COUNT=${COMMIT_COUNT:-0}
+          
+          echo "COMMIT_COUNT=count_${COMMIT_COUNT}" >> $GITHUB_OUTPUT
+          echo "COMMITS<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Generate PR Description
+        id: pr-description
+        run: |
+          BASE_BRANCH="${{ steps.pr-info.outputs.BASE_BRANCH }}"
+          HEAD_BRANCH="${{ steps.pr-info.outputs.HEAD_BRANCH }}"
+          
+          COMMIT_COUNT="${{ steps.commits.outputs.COMMIT_COUNT }}"
+          COMMIT_COUNT="${COMMIT_COUNT#count_}"
+          
+          BACKEND_COUNT="${{ steps.changed-files.outputs.BACKEND_COUNT }}"
+          BACKEND_COUNT="${BACKEND_COUNT#count_}"
+          
+          TASK_COUNT="${{ steps.changed-files.outputs.TASK_COUNT }}"
+          TASK_COUNT="${TASK_COUNT#count_}"
+          
+          CONFIG_COUNT="${{ steps.changed-files.outputs.CONFIG_COUNT }}"
+          CONFIG_COUNT="${CONFIG_COUNT#count_}"
+          
+          TOTAL_COUNT="${{ steps.changed-files.outputs.TOTAL_COUNT }}"
+          TOTAL_COUNT="${TOTAL_COUNT#count_}"
+          
+          COMMITS="${{ steps.commits.outputs.COMMITS }}"
+          
+          {
+            echo "## 📋 변경사항 요약"
+            echo ""
+            echo "**브랜치**: \`${HEAD_BRANCH}\` → \`${BASE_BRANCH}\`"
+            echo "**커밋 수**: ${COMMIT_COUNT}개"
+            echo "**변경된 파일**: ${TOTAL_COUNT}개"
+            echo ""
+            echo "### 📁 변경된 파일 분류"
+            echo "- **Backend**: ${BACKEND_COUNT}개"
+            echo "- **Task Projects**: ${TASK_COUNT}개"
+            echo "- **설정/문서**: ${CONFIG_COUNT}개"
+            echo ""
+            echo "---"
+            echo ""
+            echo "## 📝 커밋 내역"
+            echo ""
+            if [ -n "$COMMITS" ]; then
+              echo "$COMMITS"
+            else
+              echo "커밋이 없습니다."
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "## 📂 주요 변경 파일"
+          } > pr_description.md
+          
+          if [ "$BACKEND_COUNT" -gt 0 ]; then
+            echo "" >> pr_description.md
+            echo "### Backend" >> pr_description.md
+            echo "\`\`\`" >> pr_description.md
+            echo "${{ steps.changed-files.outputs.BACKEND_FILES }}" >> pr_description.md
+            echo "\`\`\`" >> pr_description.md
+          fi
+          
+          if [ "$TASK_COUNT" -gt 0 ]; then
+            echo "" >> pr_description.md
+            echo "### Task Projects" >> pr_description.md
+            echo "\`\`\`" >> pr_description.md
+            echo "${{ steps.changed-files.outputs.TASK_FILES }}" >> pr_description.md
+            echo "\`\`\`" >> pr_description.md
+          fi
+          
+          if [ "$CONFIG_COUNT" -gt 0 ]; then
+            echo "" >> pr_description.md
+            echo "### 설정/문서" >> pr_description.md
+            echo "\`\`\`" >> pr_description.md
+            echo "${{ steps.changed-files.outputs.CONFIG_FILES }}" >> pr_description.md
+            echo "\`\`\`" >> pr_description.md
+          fi
+          
+          cat >> pr_description.md << 'EOF'
+          
+          ---
+          
+          ## ✅ 체크리스트
+          
+          - [ ] 코드 리뷰 완료
+          - [ ] 테스트 완료
+          - [ ] 문서 업데이트 (필요한 경우)
+          - [ ] 빌드 테스트 통과
+          EOF
+
+      - name: Update PR Description
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const prNumber = ${{ github.event.pull_request.number }};
+            const description = fs.readFileSync('pr_description.md', 'utf8');
+            
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            
+            if (!pr.body || pr.body.trim().length < 50) {
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                body: description,
+              });
+              console.log('✅ PR description updated automatically');
+            } else {
+              console.log('ℹ️ PR description already exists, skipping auto-update');
+            }
+
