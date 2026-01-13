@@ -200,15 +200,13 @@ jobs:
       - name: Send Google Chat Notification
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
-          NOTES: ${{ steps.release-notes.outputs.NOTES }}
         run: |
           if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
             python3 << 'PYEOF' | curl --insecure -k -s -X POST -H "Content-Type: application/json" -d @- "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           import json
           import os
           version = os.environ.get('VERSION', '')
-          notes = os.environ.get('NOTES', '')
-          text = f"🚀 AWEN Build Agent v{version} 배포 완료\n\n변경사항:\n{notes}"
+          text = f"🚀 AWEN Build Agent v{version} 배포 완료"
           payload = {'text': text}
           print(json.dumps(payload, ensure_ascii=False))
           PYEOF
