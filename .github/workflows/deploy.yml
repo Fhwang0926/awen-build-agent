@@ -92,12 +92,12 @@ jobs:
           ls -al
         
       - name: Login to Harbor Registry
-        if: ${{ secrets.HARBOR_REGISTRY != '' }}
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.HARBOR_REGISTRY }}
-          username: ${{ secrets.HARBOR_BOT_ID }}
-          password: ${{ secrets.HARBOR_BOT_PW }}
+        run: |
+          if [ -n "${{ secrets.HARBOR_REGISTRY }}" ] && [ -n "${{ secrets.HARBOR_BOT_ID }}" ] && [ -n "${{ secrets.HARBOR_BOT_PW }}" ]; then
+            echo "${{ secrets.HARBOR_BOT_PW }}" | docker login ${{ secrets.HARBOR_REGISTRY }} -u "${{ secrets.HARBOR_BOT_ID }}" --password-stdin
+          else
+            echo "Harbor Registry secrets not set, skipping login"
+          fi
       
       - name: Build Docker Image
         run: |
@@ -126,10 +126,13 @@ jobs:
           echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_ENV
       
       - name: Push Docker Image
-        if: ${{ secrets.HARBOR_REGISTRY != '' }}
         run: |
-          docker push ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
-          docker push ${{ env.IMAGE_NAME }}:latest
+          if [ -n "${{ secrets.HARBOR_REGISTRY }}" ]; then
+            docker push ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+            docker push ${{ env.IMAGE_NAME }}:latest
+          else
+            echo "HARBOR_REGISTRY secret not set, skipping push"
+          fi
 
   deploy:
     name: Deploy and Webhook
@@ -192,18 +195,24 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Trigger Deployment Webhook
-        if: ${{ secrets.WEB_HOOK_TARGET != '' }}
         run: |
-          curl --insecure -k -s -d "payload={\"version\":\"${{ steps.version.outputs.VERSION }}\",\"service\":\"build-agent\"}" "${{ secrets.WEB_HOOK_TARGET }}"
+          if [ -n "${{ secrets.WEB_HOOK_TARGET }}" ]; then
+            curl --insecure -k -s -d "payload={\"version\":\"${{ steps.version.outputs.VERSION }}\",\"service\":\"build-agent\"}" "${{ secrets.WEB_HOOK_TARGET }}"
+          else
+            echo "WEB_HOOK_TARGET secret not set, skipping webhook"
+          fi
 
       - name: Send Google Chat Notification
-        if: ${{ secrets.GOOGLE_CHAT_HOOK_TARGET != '' }}
         run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          NOTES="${{ steps.release-notes.outputs.NOTES }}"
-          TEXT="🚀 AWEN Build Agent v${VERSION} 배포 완료\n\n변경사항:\n${NOTES}"
-          PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
-          curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
+            VERSION="${{ steps.version.outputs.VERSION }}"
+            NOTES="${{ steps.release-notes.outputs.NOTES }}"
+            TEXT="🚀 AWEN Build Agent v${VERSION} 배포 완료\n\n변경사항:\n${NOTES}"
+            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
+            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          else
+            echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
+          fi
 
   notify-failure:
     name: Notify on Failure
@@ -212,10 +221,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send Failure Notification
-        if: ${{ secrets.GOOGLE_CHAT_HOOK_TARGET != '' }}
         run: |
-          VERSION="${{ github.ref_name }}"
-          TEXT="❌ AWEN Build Agent 배포 실패: ${VERSION}\n\n배포 중 오류가 발생했습니다."
-          PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
-          curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
+            VERSION="${{ github.ref_name }}"
+            TEXT="❌ AWEN Build Agent 배포 실패: ${VERSION}\n\n배포 중 오류가 발생했습니다."
+            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
+            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          else
+            echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
+          fi
 
