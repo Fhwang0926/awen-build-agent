@@ -202,8 +202,15 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
-            PAYLOAD=$(python3 -c "import json, os; print(json.dumps({'text': f'🚀 AWEN Build Agent v{os.environ.get(\"VERSION\", \"\")} 배포 완료'}, ensure_ascii=False))")
-            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+            python3 << 'PYEOF' > /tmp/payload.json
+          import json
+          import os
+          version = os.environ.get('VERSION', '')
+          text = f"🚀 AWEN Build Agent v{version} 배포 완료"
+          payload = {'text': text}
+          print(json.dumps(payload, ensure_ascii=False))
+          PYEOF
+            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d @/tmp/payload.json "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           else
             echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
           fi
