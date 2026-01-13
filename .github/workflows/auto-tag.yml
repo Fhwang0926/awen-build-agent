@@ -148,7 +148,7 @@ jobs:
             NEW_VERSION="${{ steps.new-version.outputs.NEW_VERSION }}"
             NOTES="${{ steps.release-notes.outputs.NOTES }}"
             TEXT="🏷️ AWEN Build Agent $NEW_VERSION 태그 생성됨\n\n변경사항:\n${NOTES}\n\nGitHub: ${{ github.server_url }}/${{ github.repository }}/releases/tag/$NEW_VERSION"
-            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
+            PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'text': sys.argv[1]}))" "$TEXT")
             curl -X POST \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \

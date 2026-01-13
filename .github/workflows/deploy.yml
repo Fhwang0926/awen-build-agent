@@ -94,7 +94,22 @@ jobs:
       - name: Login to Harbor Registry
         run: |
           if [ -n "${{ secrets.HARBOR_REGISTRY }}" ] && [ -n "${{ secrets.HARBOR_BOT_ID }}" ] && [ -n "${{ secrets.HARBOR_BOT_PW }}" ]; then
-            echo "${{ secrets.HARBOR_BOT_PW }}" | docker login ${{ secrets.HARBOR_REGISTRY }} -u "${{ secrets.HARBOR_BOT_ID }}" --password-stdin
+            HARBOR_REGISTRY="${{ secrets.HARBOR_REGISTRY }}"
+            # Remove https:// or http:// prefix if present (docker login needs just the hostname)
+            HARBOR_REGISTRY=$(echo "$HARBOR_REGISTRY" | sed 's|^https\?://||' | sed 's|/$||')
+            echo "Logging into Harbor Registry: $HARBOR_REGISTRY"
+            echo "${{ secrets.HARBOR_BOT_PW }}" | docker login "$HARBOR_REGISTRY" -u "${{ secrets.HARBOR_BOT_ID }}" --password-stdin
+            if [ $? -eq 0 ]; then
+              echo "✅ Successfully logged into Harbor Registry"
+            else
+              echo "❌ Failed to login to Harbor Registry"
+              echo "Please check:"
+              echo "  1. Harbor Registry URL is correct: $HARBOR_REGISTRY"
+              echo "  2. Username is correct: ${{ secrets.HARBOR_BOT_ID }}"
+              echo "  3. Password is correct"
+              echo "  4. User has permission to push to the registry"
+              exit 1
+            fi
           else
             echo "Harbor Registry secrets not set, skipping login"
           fi
@@ -208,7 +223,7 @@ jobs:
             VERSION="${{ steps.version.outputs.VERSION }}"
             NOTES="${{ steps.release-notes.outputs.NOTES }}"
             TEXT="🚀 AWEN Build Agent v${VERSION} 배포 완료\n\n변경사항:\n${NOTES}"
-            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
+            PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'text': sys.argv[1]}))" "$TEXT")
             curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           else
             echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
@@ -225,7 +240,7 @@ jobs:
           if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
             VERSION="${{ github.ref_name }}"
             TEXT="❌ AWEN Build Agent 배포 실패: ${VERSION}\n\n배포 중 오류가 발생했습니다."
-            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
+            PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'text': sys.argv[1]}))" "$TEXT")
             curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           else
             echo "GOOGLE_CHAT_HOOK_TARGET secret not set, skipping notification"
