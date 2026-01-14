@@ -17,11 +17,11 @@ const fs = require('fs');
 const POLL_INTERVAL = 5000;
 
 // 최대 동시 작업 횟수
-const MAX_CONCURRENT_TASKS = 2;
+const MAX_CONCURRENT_TASKS = 1;
 const limit = pLimit(MAX_CONCURRENT_TASKS);
 
 // 최대 수정 시도 횟수
-const MAX_ATTEMPTS = 1;
+const MAX_ATTEMPTS = 2;
 
 // 주기적 실행 함수
 async function startAgent() {
@@ -125,7 +125,8 @@ async function determineErrorType(error) {
         'module_not_found', 'cannot find module', 'syntaxerror', 'referenceerror',
         'typeerror', 'npm err', 'yarn error', 'command failed', 'exit code',
         'failed to solve', 'executor failed', 'enoent', 'unsupported engine',
-        'directory not found', '.env', 'manifest not found', 'pkg-config'
+        'directory not found', '.env', 'manifest not found', 'pkg-config',
+        'err_ossl_evp_unsupported', 'digital envelope routines'
     ];
 
     if (serviceKeywords.some(keyword => msg.includes(keyword))) {
@@ -144,7 +145,7 @@ async function determineErrorType(error) {
 }
 
 // 빌드 파이프라인 실행
-async function runDeploymentPipeline(targetPath) {
+async function runDeploymentPipeline(targetPath, hostingId) {
     console.log("=== 🤖 다중 LLM 에이전트 배포 파이프라인 시작 ===");
     console.log(`선택된 프로젝트: ${targetPath}`);
 
@@ -167,6 +168,11 @@ async function runDeploymentPipeline(targetPath) {
         currentPlan = await analyzeCodebase(currentProjectPath);
         console.log(`\n🔍 [AnalyzerAgent]: 초기 계획 수립 완료. 유형: ${currentPlan.type}`);
 
+        // 실제 프로젝트 경로로 업데이트 (중첩 폴더 대응)
+        if (currentPlan.sourceMountPath) {
+            currentProjectPath = currentPlan.sourceMountPath;
+        }
+
         while (attempt <= MAX_ATTEMPTS && !buildSuccess) {
             console.log(`\n=================================================`);
             console.log(`   🔁 [라운드 ${attempt}] 빌드 시도 #${attempt} 시작 (프로젝트 경로: ${currentProjectPath})`);
@@ -175,7 +181,7 @@ async function runDeploymentPipeline(targetPath) {
             try {
                 // 2. 🏗️ 빌드 및 실행 에이전트 호출
                 step = 'BUILD';
-                artifactPath = await runDockerBuildAndMount(currentPlan);
+                artifactPath = await runDockerBuildAndMount(currentPlan, hostingId);
                 buildSuccess = true;
                 break;
 
@@ -195,7 +201,7 @@ async function runDeploymentPipeline(targetPath) {
 
                 try {
                     // DebuggerAgent는 수정된 코드를 새 폴더에 저장하고, 빌드 테스트 후 새 경로를 반환합니다.
-                    const modifiedProjectPath = await debugAndFixCode(currentProjectPath, error, currentPlan);
+                    const modifiedProjectPath = await debugAndFixCode(currentProjectPath, error, currentPlan, hostingId);
 
                     // 수정된 프로젝트로 경로와 계획 업데이트
                     currentProjectPath = modifiedProjectPath;
@@ -292,7 +298,7 @@ async function buildProject(task) {
         await gitClone(task.repo_url, task.token, targetPath);
 
         // 빌드 수행
-        const buildResult = await runDeploymentPipeline(targetPath);
+        const buildResult = await runDeploymentPipeline(targetPath, String(task.hosting_id));
         const endTime = new Date();
 
         // 클론된 소스코드 제거

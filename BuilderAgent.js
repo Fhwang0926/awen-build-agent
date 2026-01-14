@@ -3,14 +3,14 @@
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 /**
  * 맞춤형 Docker 컨테이너를 빌드하고 소스 마운트 후 빌드를 실행합니다.
+ * @param {string} hostingId - 빌드할 호스팅 아이디 (중복 방지)
  * @param {object} plan - AnalyzerAgent의 분석 결과
  * @returns {Promise<string>} - 빌드 결과물이 위치한 호스트 경로 (Artifact Path)
  */
-function runDockerBuildAndMount(plan) {
+function runDockerBuildAndMount(plan, hostingId) {
     return new Promise((resolve, reject) => {
         const tempDir = path.join(__dirname, 'temp_build');
         const dockerfilePath = path.join(tempDir, 'Dockerfile');
@@ -51,12 +51,16 @@ function runDockerBuildAndMount(plan) {
             // 소스코드 마운트: 호스트의 소스코드 -> 컨테이너의 작업 경로
             // Windows 경로를 Docker가 이해할 수 있도록 변환
             const sourcePath = plan.sourceMountPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
-            let volumeMounts = `-v "${sourcePath}":${appWorkDir}`;
+
+            // ENOTEMPTY 문제로 node_modules를 별도 마운트
+            let volumeMounts = `-v "${sourcePath}":${appWorkDir} -v ${appWorkDir}/node_modules`;
+
+            // '호스팅 단위' 빌드 결과 폴더 경로 설정 (중복 방지 및 프로젝트 변경 대응)
+            const artifactHostPath = path.join(tempDir, 'artifact_output', hostingId);
 
             // 프론트엔드인 경우: 결과물 폴더 마운트 설정
             if (plan.artifactDir) {
                 // 고유한 빌드 결과 임시 폴더 생성 (중복 방지)
-                const artifactHostPath = path.join(tempDir, 'artifact_output', buildImageName);
                 const artifactPath = artifactHostPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
                 if (!fs.existsSync(artifactHostPath)) fs.mkdirSync(artifactHostPath, { recursive: true });
 
@@ -95,7 +99,7 @@ function runDockerBuildAndMount(plan) {
                     // 결과물 확인
                     if (plan.artifactDir) {
                         const artifactPath = path.join(plan.sourceMountPath, plan.artifactDir);
-                        const artifactHostPath = path.join(tempDir, 'artifact_output');
+                        const artifactHostPath = path.join(tempDir, 'artifact_output', hostingId);
 
                         if (fs.existsSync(artifactHostPath)) {
                             const files = fs.readdirSync(artifactHostPath);
@@ -132,7 +136,7 @@ function runDockerBuildAndMount(plan) {
                                         }
 
                                         // 복사된 경로로 결과물 반환
-                                        resolve(path.join(tempDir, 'artifact_output', buildImageName));
+                                        resolve(path.join(tempDir, 'artifact_output', hostingId));
                                         return;
                                     }
                                 }
@@ -141,12 +145,12 @@ function runDockerBuildAndMount(plan) {
                     }
 
                     // 결과물 경로 반환 (프론트엔드인 경우에만 필요)
-                    const resultPath = plan.artifactDir ? path.join(tempDir, 'artifact_output') : '';
+                    const resultPath = plan.artifactDir ? path.join(tempDir, 'artifact_output', hostingId) : '';
                     resolve(resultPath);
                 } else {
                     console.warn("\n   ⚠️ 빌드 출력에서 성공 신호를 찾을 수 없습니다.");
                     // 성공 신호가 없어도 에러가 없으면 성공으로 간주
-                    const resultPath = plan.artifactDir ? path.join(tempDir, 'artifact_output') : '';
+                    const resultPath = plan.artifactDir ? path.join(tempDir, 'artifact_output', hostingId) : '';
                     resolve(resultPath);
                 }
             });
