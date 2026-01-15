@@ -19,4 +19,4 @@ jobs:
           TEXT="test"
           PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
           echo "PAYLOAD: $PAYLOAD"
-          curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          echo curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
