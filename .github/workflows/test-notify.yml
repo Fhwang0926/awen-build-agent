@@ -16,23 +16,6 @@ jobs:
       - name: Send Notification
         continue-on-error: false
         run: |
-          if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
-            BRANCH="${{ github.ref_name }}"
-            COMMIT_MSG="${{ github.event.head_commit.message }}"
-            COMMIT_SHA="${{ github.sha }}"
-            COMMIT_SHA_SHORT="${COMMIT_SHA:0:7}"
-            
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              TEXT="Test 브랜치 PR: ${BRANCH}\n커밋: ${COMMIT_SHA_SHORT}"
-            else
-              TEXT="Test 브랜치 Push: ${BRANCH}\n커밋: ${COMMIT_SHA_SHORT}\n메시지: ${COMMIT_MSG}"
-            fi
-            
-            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}') || PAYLOAD="{\"text\": \"${TEXT}\"}"
-            WEBHOOK_URL="${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
-            curl -X POST \
-              -H 'Content-Type: application/json; charset=UTF-8' \
-              -d "$PAYLOAD" \
-              "$WEBHOOK_URL"
-          fi
-
+          TEXT="test"
+          PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
+          curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
