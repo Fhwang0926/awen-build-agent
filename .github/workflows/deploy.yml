@@ -199,15 +199,10 @@ jobs:
 
       - name: Send Google Chat Notification
         continue-on-error: false
-        env:
-          WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}
         run: |
-          if [ -n "$WEBHOOK_URL" ]; then
+          if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
             VERSION="${{ steps.version.outputs.VERSION }}"
-            curl --globoff -X POST \
-              -H 'Content-Type: application/json; charset=UTF-8' \
-              -d "{\"text\": \"AWEN Build Agent v${VERSION} 배포 완료\"}" \
-              "$WEBHOOK_URL" || true
+            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "{\"text\": \"AWEN Build Agent v${VERSION} 배포 완료\"}" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           fi
 
   notify-failure:
@@ -218,14 +213,9 @@ jobs:
     steps:
       - name: Send Failure Notification
         continue-on-error: false
-        env:
-          WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}
         run: |
-          if [ -n "$WEBHOOK_URL" ]; then
+          if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
             VERSION="${{ github.ref_name }}"
-            curl --globoff -X POST \
-              -H 'Content-Type: application/json; charset=UTF-8' \
-              -d "{\"text\": \"AWEN Build Agent 배포 실패: ${VERSION}\"}" \
-              "$WEBHOOK_URL" || true
+            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "{\"text\": \"AWEN Build Agent 배포 실패: ${VERSION}\"}" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           fi
 
