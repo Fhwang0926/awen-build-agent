@@ -29,7 +29,10 @@ jobs:
             fi
             
             PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}') || PAYLOAD="{\"text\": \"${TEXT}\"}"
-            echo "PAYLOAD: $PAYLOAD"
-            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+            WEBHOOK_URL="${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+            curl -X POST \
+              -H 'Content-Type: application/json; charset=UTF-8' \
+              -d "$PAYLOAD" \
+              "$WEBHOOK_URL"
           fi
 
