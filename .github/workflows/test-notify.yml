@@ -16,7 +16,7 @@ jobs:
       - name: Send Notification
         continue-on-error: false
         run: |
-          TEXT="test"
-          PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}')
+          PAYLOAD="{\"text\":\"123\"}"
           echo "PAYLOAD: $PAYLOAD"
           echo curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
