@@ -15,10 +15,8 @@ jobs:
     steps:
       - name: Send Notification
         continue-on-error: true
-        env:
-          WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}
         run: |
-          if [ -n "$WEBHOOK_URL" ]; then
+          if [ -n "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}" ]; then
             BRANCH="${{ github.ref_name }}"
             COMMIT_MSG="${{ github.event.head_commit.message }}"
             COMMIT_SHA="${{ github.sha }}"
@@ -30,9 +28,9 @@ jobs:
               TEXT="Test 브랜치 Push: ${BRANCH}\n커밋: ${COMMIT_SHA_SHORT}\n메시지: ${COMMIT_MSG}"
             fi
             
-            curl --globoff -X POST \
-              -H 'Content-Type: application/json; charset=UTF-8' \
-              -d "{\"text\": \"${TEXT}\"}" \
-              "$WEBHOOK_URL" || true
+            PAYLOAD=$(python3 -c "import json, sys; print(json.dumps({'text': sys.argv[1]}, ensure_ascii=False))" "$TEXT" 2>&1) || {
+              PAYLOAD="{\"text\": \"${TEXT}\"}"
+            }
+            curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           fi
 
