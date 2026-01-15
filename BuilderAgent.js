@@ -13,7 +13,7 @@ const path = require('path');
 function runDockerBuildAndMount(plan, hostingId) {
     return new Promise((resolve, reject) => {
         const tempDir = path.join(__dirname, 'temp_build');
-        const dockerfilePath = path.join(tempDir, 'Dockerfile');
+        const dockerfilePath = path.join(plan.sourceMountPath, 'Dockerfile');
         const buildImageName = `llm-build-${Date.now()}`;
         const containerName = `llm-builder-${Date.now()}`;
 
@@ -27,7 +27,7 @@ function runDockerBuildAndMount(plan, hostingId) {
         console.log(`   -> 빌드 명령: ${plan.buildCommand}`);
 
         // 1. 빌드 이미지 생성
-        exec(`docker build -t ${buildImageName} ${tempDir}`, (err, stdout, stderr) => {
+        exec(`docker build -t ${buildImageName} .`, { cwd: plan.sourceMountPath }, (err, stdout, stderr) => {
             if (err) {
                 const errorMessage = `Docker 이미지 빌드 실패: ${stderr || stdout || err.message}`;
                 return reject(new Error(errorMessage));

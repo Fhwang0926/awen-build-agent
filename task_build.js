@@ -17,11 +17,11 @@ const fs = require('fs');
 const POLL_INTERVAL = 5000;
 
 // 최대 동시 작업 횟수
-const MAX_CONCURRENT_TASKS = 1;
+const MAX_CONCURRENT_TASKS = 3;
 const limit = pLimit(MAX_CONCURRENT_TASKS);
 
 // 최대 수정 시도 횟수
-const MAX_ATTEMPTS = 2;
+const MAX_ATTEMPTS = 5;
 
 // 주기적 실행 함수
 async function startAgent() {
@@ -64,25 +64,22 @@ async function processTask() {
 
 // Git 저장소를 특정 경로로 클론하는 함수
 async function gitClone(repo_url, token, targetPath) {
-    try {
-        console.log(`🚚 Git 클론 시작: ${repo_url} -> ${targetPath}`);
-        const base64Token = Buffer.from(`x-access-token:${token}`).toString('base64');
+    console.log(`🚚 Git 클론 시작: ${repo_url} -> ${targetPath}`);
+    const base64Token = Buffer.from(`x-access-token:${token}`).toString('base64');
 
-        // 헤더 설정을 포함하여 Git 클론 실행
-        const git = simpleGit();
-        await git.clone(repo_url, targetPath, [
-            '--config', `http.extraheader=Authorization: Basic ${base64Token}`
-        ]);
+    // 헤더 설정을 포함하여 Git 클론 실행
+    const git = simpleGit();
+    await git.clone(repo_url, targetPath, [
+        '--config', `http.extraheader=Authorization: Basic ${base64Token}`
+    ]);
 
-        // 해당 폴더의 설정에서 헤더 제거
-        await git.raw(['config', '--local', '--unset', 'http.extraheader']);
+    // 해당 폴더의 설정에서 헤더 제거
+    await git.raw(['config', '--local', '--unset', 'http.extraheader']);
 
-        console.log('✅ Git clone 완료');
-    } catch (error) {
-        console.error('❌ Clone 중 에러 발생:', error);
-        throw error;
-    }
+    console.log('✅ Git clone 완료');
 }
+
+
 
 // 클론된 소스코드 제거 함수
 async function removeClonedProject(targetPath) {
@@ -191,8 +188,10 @@ async function runDeploymentPipeline(targetPath, hostingId) {
 
                 if (attempt === MAX_ATTEMPTS) {
                     errorType = await determineErrorType(error);
+                    logs.error = error.message || error;
                     throw new Error(`최대 수정 시도 횟수(${MAX_ATTEMPTS}회)를 초과했습니다. 자동 조치 실패. ${errorType}`);
                 }
+
 
                 // 3. 🩹 디버깅 및 수정 에이전트 호출
                 step = 'DEBUG';
@@ -280,6 +279,8 @@ async function runDeploymentPipeline(targetPath, hostingId) {
         logs.error = error.message;
 
         return {
+            //TODO: 결과 api 수정 시 error_type 필드 주석 제거 필요
+            // error_type: errorType,
             status: 'FAILED',
             step: step,
             logs: logs,
@@ -295,7 +296,25 @@ async function buildProject(task) {
         const targetPath = path.join(__dirname, 'cloned_projects', `${repoName}-${Date.now()}`);
 
         // Git Clone 수행
-        await gitClone(task.repo_url, task.token, targetPath);
+        try {
+            await gitClone(task.repo_url, task.token, targetPath);
+        } catch (error) {
+            console.error('❌ Git Clone 실패:', error);
+            // TODO: 결과 api 수정 시 error_type 필드 주석 제거 필요
+            await reportBuildResult({
+                // error_type: 'CLONED_ERROR', 
+                task_id: task.id,
+                user_id: task.user_id,
+                hosting_id: task.hosting_id,
+                step: 'CLONE',
+                logs: {
+                    summary: 'Git Clone 실패',
+                    error: error.message || String(error)
+                },
+                duration_ms: new Date() - startTime
+            });
+            return;
+        }
 
         // 빌드 수행
         const buildResult = await runDeploymentPipeline(targetPath, String(task.hosting_id));

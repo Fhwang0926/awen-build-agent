@@ -10,15 +10,19 @@ const { exec } = require('child_process');
 function deployToWebServer(artifactHostPath, type) {
     console.log(`\n🚀 [DeployerAgent]: 최종 웹 서버 배포 시작...`);
     const containerName = 'llm-web-server';
-    
+
     // 1. 배포할 이미지와 마운트 경로 설정
     let imageName, volumeMount;
 
     if (type.includes('Frontend')) {
         // Nginx를 사용해 정적 파일 (프론트엔드) 서비스
         imageName = 'nginx:alpine';
+
+        // Windows 경로 호환성 처리 (BuilderAgent와 동일한 로직적용)
+        const hostPath = artifactHostPath.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1').toLowerCase();
+
         // 빌드 결과물을 Nginx의 기본 웹 루트에 마운트
-        volumeMount = `-v ${artifactHostPath}:/usr/share/nginx/html:ro`; 
+        volumeMount = `-v "${hostPath}":/usr/share/nginx/html:ro`;
     } else {
         // 백엔드(Node.js)를 직접 실행하는 컨테이너 가정
         imageName = 'node:20-alpine';
@@ -36,7 +40,7 @@ function deployToWebServer(artifactHostPath, type) {
     // 이전 컨테이너 정리 및 새 컨테이너 실행
     exec(`docker stop ${containerName} && docker rm ${containerName}`, { stdio: 'ignore' }, () => {
         const runCmd = `docker run -d --name ${containerName} ${portMapping} ${volumeMount} ${imageName}`;
-        
+
         exec(runCmd, (err, stdout, stderr) => {
             if (err) {
                 console.error(`   🛑 웹 서버 시작 실패: ${stderr}`);
