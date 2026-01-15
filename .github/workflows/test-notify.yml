@@ -1,0 +1,38 @@
+name: Test Branch Notification
+
+on:
+  push:
+    branches:
+      - test
+  pull_request:
+    branches:
+      - test
+
+jobs:
+  notify:
+    name: Send Google Chat Notification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Notification
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}
+        run: |
+          if [ -n "$WEBHOOK_URL" ]; then
+            BRANCH="${{ github.ref_name }}"
+            COMMIT_MSG="${{ github.event.head_commit.message }}"
+            COMMIT_SHA="${{ github.sha }}"
+            COMMIT_SHA_SHORT="${COMMIT_SHA:0:7}"
+            
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              TEXT="Test 브랜치 PR: ${BRANCH}\n커밋: ${COMMIT_SHA_SHORT}"
+            else
+              TEXT="Test 브랜치 Push: ${BRANCH}\n커밋: ${COMMIT_SHA_SHORT}\n메시지: ${COMMIT_MSG}"
+            fi
+            
+            curl --globoff -X POST \
+              -H 'Content-Type: application/json; charset=UTF-8' \
+              -d "{\"text\": \"${TEXT}\"}" \
+              "$WEBHOOK_URL" || true
+          fi
+
