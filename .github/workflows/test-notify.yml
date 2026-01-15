@@ -16,7 +16,5 @@ jobs:
       - name: Send Notification
         continue-on-error: false
         run: |
-          PAYLOAD="{\"text\":\"123\"}"
-          echo "PAYLOAD: $PAYLOAD"
-          echo curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
-          curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          echo curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "{\"text\":\"123\"}" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
+          curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "{\"text\":\"123\"}" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
