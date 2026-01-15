@@ -28,9 +28,8 @@ jobs:
               TEXT="Test 브랜치 Push: ${BRANCH}\n커밋: ${COMMIT_SHA_SHORT}\n메시지: ${COMMIT_MSG}"
             fi
             
-            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}') || {
-              PAYLOAD="{\"text\": \"${TEXT}\"}"
-            }
+            PAYLOAD=$(jq -n --arg text "$TEXT" '{text:$text}') || PAYLOAD="{\"text\": \"${TEXT}\"}"
+            echo "PAYLOAD: $PAYLOAD"
             curl --insecure -k -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${{ secrets.GOOGLE_CHAT_HOOK_TARGET }}"
           fi
 
